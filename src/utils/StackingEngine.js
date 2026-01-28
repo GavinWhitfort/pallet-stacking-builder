@@ -123,7 +123,7 @@ class FreeRectangles {
 }
 
 // Layer packing using Maximal Rectangles
-function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_TOLERANCE) {
+function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_TOLERANCE, strategy = 'hybrid') {
     const effectiveW = palletWidth + allowedOverhang * 2;
     const effectiveD = palletDepth + allowedOverhang * 2;
     
@@ -131,22 +131,75 @@ function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_T
     const placed = [];
     const remaining = [...boxes];
 
+    // In "lowest" mode, prioritize fitting within pallet bounds
+    const preferInBounds = strategy === 'lowest';
+    
     // Sort boxes by area (largest first) for better packing
     remaining.sort((a, b) => (b.width * b.depth) - (a.width * a.depth));
 
     for (let i = 0; i < remaining.length; i++) {
         const box = remaining[i];
-        const placement = freeRects.findBestFit(box.width, box.depth);
+        
+        // In "lowest" mode, try all 6 orientations (including on-edge)
+        let placement;
+        if (strategy === 'lowest') {
+            const orientations = [
+                { w: box.width, d: box.depth },
+                { w: box.depth, d: box.width },
+                { w: box.width, d: box.height },
+                { w: box.height, d: box.width },
+                { w: box.depth, d: box.height },
+                { w: box.height, d: box.depth }
+            ];
+            
+            let bestPlacement = null;
+            let bestScore = Infinity;
+            
+            for (const orient of orientations) {
+                const tempPlacement = freeRects.findBestFit(orient.w, orient.d);
+                if (tempPlacement) {
+                    // Score based on staying within pallet bounds
+                    const overhangsX = Math.max(0, tempPlacement.x + tempPlacement.width - palletWidth - allowedOverhang);
+                    const overhangsZ = Math.max(0, tempPlacement.z + tempPlacement.depth - palletDepth - allowedOverhang);
+                    const overhangPenalty = (overhangsX + overhangsZ) * 1000;
+                    
+                    // Prefer orientations that minimize height
+                    const heightAfterRotation = orient.w === box.width && orient.d === box.depth ? box.height :
+                                                orient.w === box.width && orient.d === box.height ? box.depth :
+                                                orient.w === box.depth && orient.d === box.height ? box.width :
+                                                orient.w === box.height && orient.d === box.width ? box.depth :
+                                                orient.w === box.height && orient.d === box.depth ? box.width : box.height;
+                    
+                    const score = heightAfterRotation + overhangPenalty;
+                    
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestPlacement = { ...tempPlacement, newHeight: heightAfterRotation };
+                    }
+                }
+            }
+            
+            placement = bestPlacement;
+        } else {
+            placement = freeRects.findBestFit(box.width, box.depth);
+        }
 
         if (placement) {
-            placed.push({
+            const placedBox = {
                 ...box,
                 x: placement.x - allowedOverhang,
                 z: placement.z - allowedOverhang,
                 width: placement.width,
                 depth: placement.depth,
                 rotated: placement.rotated
-            });
+            };
+            
+            // Update height if rotated on edge in "lowest" mode
+            if (strategy === 'lowest' && placement.newHeight) {
+                placedBox.height = placement.newHeight;
+            }
+            
+            placed.push(placedBox);
             freeRects.placeBox(placement);
             remaining.splice(i, 1);
             i--; // Adjust index after removal
@@ -208,8 +261,8 @@ function canPlaceOnLayer(box, layer, palletWidth, palletDepth, strategy = 'hybri
     if (layer.length === 0) return true; // Ground level always OK
 
     // Strategy-based support requirements
-    const supportThreshold = strategy === 'lowest' ? 0.5 : strategy === 'stable' ? 0.8 : MIN_SUPPORT_PERCENTAGE;
-    const maxWeightOnFragile = strategy === 'lowest' ? 50 : strategy === 'stable' ? 20 : 30;
+    const supportThreshold = strategy === 'lowest' ? 0.4 : strategy === 'stable' ? 0.8 : MIN_SUPPORT_PERCENTAGE;
+    const maxWeightOnFragile = strategy === 'lowest' ? 60 : strategy === 'stable' ? 20 : 30;
 
     // Check fragility: never place heavy boxes on fragile ones
     const maxFragilityBelow = Math.max(...layer.map(b => b.fragileRating || 5));
@@ -321,18 +374,34 @@ function packSinglePallet(boxes, pallet, strategy = 'hybrid') {
         // Group boxes by similar height for efficient layering
         const heightGroups = {};
         for (const box of remaining) {
-            const h = box.height;
+            // In "lowest" mode, use the minimum dimension as height
+            const h = strategy === 'lowest' ? 
+                Math.min(box.width, box.depth, box.height) : 
+                box.height;
             if (!heightGroups[h]) heightGroups[h] = [];
             heightGroups[h].push(box);
         }
 
-        // Pick the most common height group
+        // Pick the most common height group (or shortest in "lowest" mode)
         let bestGroup = null;
         let maxCount = 0;
+        let minHeight = Infinity;
+        
         for (const [height, group] of Object.entries(heightGroups)) {
-            if (group.length > maxCount) {
-                maxCount = group.length;
-                bestGroup = { height: Number(height), boxes: group };
+            const h = Number(height);
+            if (strategy === 'lowest') {
+                // Prefer shortest layers that can fit multiple boxes
+                if (h < minHeight || (h === minHeight && group.length > maxCount)) {
+                    minHeight = h;
+                    maxCount = group.length;
+                    bestGroup = { height: h, boxes: group };
+                }
+            } else {
+                // Prefer most common height
+                if (group.length > maxCount) {
+                    maxCount = group.length;
+                    bestGroup = { height: h, boxes: group };
+                }
             }
         }
 
@@ -341,11 +410,16 @@ function packSinglePallet(boxes, pallet, strategy = 'hybrid') {
         }
 
         // Try to pack this height group into a layer
+        const layerOverhang = strategy === 'lowest' ? 
+            (layers.length === 0 ? 50 : 25) : // Minimize overhang in lowest mode
+            (layers.length === 0 ? OVERHANG_TOLERANCE * 2 : OVERHANG_TOLERANCE);
+            
         const { placed, remaining: layerRemaining } = packLayer(
             bestGroup.boxes, 
             pallet.width, 
             pallet.depth,
-            layers.length === 0 ? OVERHANG_TOLERANCE * 2 : OVERHANG_TOLERANCE // More overhang on bottom
+            layerOverhang,
+            strategy
         );
 
         if (placed.length === 0) {

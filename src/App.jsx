@@ -386,7 +386,7 @@ function App() {
                 </span>
               </div>
               <div style={{ marginTop: '8px', fontSize: '0.7rem', color: '#6b7280', fontStyle: 'italic' }}>
-                {packingStrategy === 'lowest' && '📦 Prioritizes minimizing height, allows tighter stacking'}
+                {packingStrategy === 'lowest' && '📦 Minimizes height by rotating boxes on sides, fits within pallet bounds'}
                 {packingStrategy === 'hybrid' && '⚖️ Balances height and stability for general use'}
                 {packingStrategy === 'stable' && '🛡️ Prioritizes safety with conservative stacking'}
               </div>
