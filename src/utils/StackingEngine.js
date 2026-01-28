@@ -91,44 +91,40 @@ function packSinglePallet(queue, pallet, presetOrientations = new Map()) {
                 let maxY = 0;
                 let topProductId = null;
 
+                let topProductId = null;
+                let topBoxIndex = null;
                 for (let ic = c; ic < c + bc; ic++) {
                     for (let ir = r; ir < r + br; ir++) {
                         if (grid[ic][ir].y > maxY) {
                             maxY = grid[ic][ir].y;
                             topProductId = grid[ic][ir].productId;
+                            topBoxIndex = grid[ic][ir].boxIndex;
                         }
                     }
                 }
                 if (maxY + orientation.h + pallet.height > MAX_HEIGHT) continue;
 
                 // --- STACKING SCORING ---
-                const isRail = box.boxIndex === 1;
-                const isTank = box.boxIndex === 0;
-                const tankQueue = queue.filter(b => b.productId === box.productId && b.boxIndex === box.boxIndex);
-                const tankIdx = tankQueue.findIndex(b => b.boxUid === box.boxUid);
                 const palletCenter = effW / 2;
                 const xStart = c * STEP;
-
-                let targetX = palletCenter;
-                if (isTank && tankQueue.length >= 2) {
-                    targetX = (tankIdx % 2 === 0) ? (palletCenter - orientation.w / 2) : (palletCenter + orientation.w / 2);
-                }
-                const centeringPenalty = Math.abs((xStart + orientation.w / 2) - targetX);
+                const boxCenter = xStart + orientation.w / 2;
+                const centeringPenalty = Math.abs(boxCenter - palletCenter);
 
                 let score = (maxY * 100) + (centeringPenalty * 10);
 
-                if (isRail) {
-                    if (maxY === 0) score += 10000000;
-                    else if (topProductId === box.productId) score -= 5000000;
-                    else if (isTank || topProductId !== null) score -= 1000000;
-                } else if (isTank) {
-                    if (maxY === 0) score -= 5000000;
-                    const currentY = maxY + pallet.height;
-                    const tanksOnThisLayer = arranged.filter(i =>
-                        i.productId === box.productId && i.boxIndex === box.boxIndex && Math.abs((i.position[1] - i.height / 2) - (maxY + pallet.height)) < 5
-                    ).length;
-                    if (tanksOnThisLayer >= 2) score += 20000000;
-                    else if (maxY > 0 && topProductId === box.productId) score -= 100000;
+                // PRIORITY 1: Stack identical items directly on top of each other
+                if (maxY > 0 && topProductId === box.productId && topBoxIndex === box.boxIndex) {
+                    score -= 10000000; // Huge bonus for stacking same items
+                }
+                
+                // PRIORITY 2: Prefer ground level for first items
+                if (maxY === 0) {
+                    score -= 5000000;
+                }
+                
+                // PENALTY: Avoid stacking on different items
+                if (maxY > 0 && (topProductId !== box.productId || topBoxIndex !== box.boxIndex)) {
+                    score += 3000000;
                 }
 
                 if (score < bestScore) {
