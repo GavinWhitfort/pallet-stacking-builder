@@ -376,7 +376,7 @@ function App() {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#9ca3af' }}>
                 <span style={{ fontWeight: packingStrategy === 'lowest' ? 'bold' : 'normal', color: packingStrategy === 'lowest' ? '#3b82f6' : '#9ca3af' }}>
-                  Lowest Profile
+                  Min Footprint
                 </span>
                 <span style={{ fontWeight: packingStrategy === 'hybrid' ? 'bold' : 'normal', color: packingStrategy === 'hybrid' ? '#eab308' : '#9ca3af' }}>
                   Hybrid
@@ -386,8 +386,8 @@ function App() {
                 </span>
               </div>
               <div style={{ marginTop: '8px', fontSize: '0.7rem', color: '#6b7280', fontStyle: 'italic' }}>
-                {packingStrategy === 'lowest' && '📦 Minimizes height by rotating boxes on sides, fits within pallet bounds'}
-                {packingStrategy === 'hybrid' && '⚖️ Balances height and stability for general use'}
+                {packingStrategy === 'lowest' && '📦 Keeps within pallet footprint (no overhang), stacks as high as needed'}
+                {packingStrategy === 'hybrid' && '⚖️ Balances footprint, height, and stability for general use'}
                 {packingStrategy === 'stable' && '🛡️ Prioritizes safety with conservative stacking'}
               </div>
             </div>

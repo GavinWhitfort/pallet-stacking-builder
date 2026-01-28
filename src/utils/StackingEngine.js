@@ -18,6 +18,7 @@ export const PALLET_TYPES = {
 };
 
 const MAX_HEIGHT = 2600;
+const MAX_HEIGHT_FOOTPRINT_MODE = 3500; // Allow taller stacks when minimizing footprint
 const OVERHANG_TOLERANCE = 100; // 10cm max overhang per side
 const MAX_COG_OFFSET = 150; // Maximum center of gravity offset (mm)
 const MIN_SUPPORT_PERCENTAGE = 0.7; // 70% of box base must be supported
@@ -124,32 +125,31 @@ class FreeRectangles {
 
 // Layer packing using Maximal Rectangles
 function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_TOLERANCE, strategy = 'hybrid') {
-    const effectiveW = palletWidth + allowedOverhang * 2;
-    const effectiveD = palletDepth + allowedOverhang * 2;
+    // In "lowest" mode (minimize footprint), NO overhang allowed - strict pallet bounds
+    const effectiveW = strategy === 'lowest' ? palletWidth : palletWidth + allowedOverhang * 2;
+    const effectiveD = strategy === 'lowest' ? palletDepth : palletDepth + allowedOverhang * 2;
     
     const freeRects = new FreeRectangles(effectiveW, effectiveD);
     const placed = [];
     const remaining = [...boxes];
 
-    // In "lowest" mode, prioritize fitting within pallet bounds
-    const preferInBounds = strategy === 'lowest';
-    
     // Sort boxes by area (largest first) for better packing
     remaining.sort((a, b) => (b.width * b.depth) - (a.width * a.depth));
 
     for (let i = 0; i < remaining.length; i++) {
         const box = remaining[i];
         
-        // In "lowest" mode, try all 6 orientations (including on-edge)
+        // In "lowest" mode (minimize footprint), try all orientations that fit within pallet
         let placement;
         if (strategy === 'lowest') {
+            // All 6 possible orientations - we want to find ANY that fits within strict bounds
             const orientations = [
-                { w: box.width, d: box.depth },
-                { w: box.depth, d: box.width },
-                { w: box.width, d: box.height },
-                { w: box.height, d: box.width },
-                { w: box.depth, d: box.height },
-                { w: box.height, d: box.depth }
+                { w: box.width, d: box.depth, h: box.height, desc: 'normal' },
+                { w: box.depth, d: box.width, h: box.height, desc: 'rotated' },
+                { w: box.width, d: box.height, h: box.depth, desc: 'on-side-1' },
+                { w: box.height, d: box.width, h: box.depth, desc: 'on-side-2' },
+                { w: box.depth, d: box.height, h: box.width, desc: 'on-side-3' },
+                { w: box.height, d: box.depth, h: box.width, desc: 'on-side-4' }
             ];
             
             let bestPlacement = null;
@@ -157,24 +157,19 @@ function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_T
             
             for (const orient of orientations) {
                 const tempPlacement = freeRects.findBestFit(orient.w, orient.d);
-                if (tempPlacement) {
-                    // Score based on staying within pallet bounds
-                    const overhangsX = Math.max(0, tempPlacement.x + tempPlacement.width - palletWidth - allowedOverhang);
-                    const overhangsZ = Math.max(0, tempPlacement.z + tempPlacement.depth - palletDepth - allowedOverhang);
-                    const overhangPenalty = (overhangsX + overhangsZ) * 1000;
+                if (tempPlacement && 
+                    tempPlacement.width <= effectiveW && 
+                    tempPlacement.depth <= effectiveD) {
                     
-                    // Prefer orientations that minimize height
-                    const heightAfterRotation = orient.w === box.width && orient.d === box.depth ? box.height :
-                                                orient.w === box.width && orient.d === box.height ? box.depth :
-                                                orient.w === box.depth && orient.d === box.height ? box.width :
-                                                orient.w === box.height && orient.d === box.width ? box.depth :
-                                                orient.w === box.height && orient.d === box.depth ? box.width : box.height;
-                    
-                    const score = heightAfterRotation + overhangPenalty;
+                    // Score: prefer orientations that maximize footprint usage (taller is better)
+                    // We want to stack HIGH to minimize footprint
+                    const heightScore = -orient.h; // Negative because we WANT tall orientations
+                    const fitScore = (effectiveW - tempPlacement.width) + (effectiveD - tempPlacement.depth);
+                    const score = fitScore + heightScore * 0.1;
                     
                     if (score < bestScore) {
                         bestScore = score;
-                        bestPlacement = { ...tempPlacement, newHeight: heightAfterRotation };
+                        bestPlacement = { ...tempPlacement, newHeight: orient.h };
                     }
                 }
             }
@@ -185,10 +180,11 @@ function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_T
         }
 
         if (placement) {
+            const adjustedOverhang = strategy === 'lowest' ? 0 : allowedOverhang;
             const placedBox = {
                 ...box,
-                x: placement.x - allowedOverhang,
-                z: placement.z - allowedOverhang,
+                x: placement.x - adjustedOverhang,
+                z: placement.z - adjustedOverhang,
                 width: placement.width,
                 depth: placement.depth,
                 rotated: placement.rotated
@@ -261,8 +257,9 @@ function canPlaceOnLayer(box, layer, palletWidth, palletDepth, strategy = 'hybri
     if (layer.length === 0) return true; // Ground level always OK
 
     // Strategy-based support requirements
-    const supportThreshold = strategy === 'lowest' ? 0.4 : strategy === 'stable' ? 0.8 : MIN_SUPPORT_PERCENTAGE;
-    const maxWeightOnFragile = strategy === 'lowest' ? 60 : strategy === 'stable' ? 20 : 30;
+    // In "lowest" (footprint mode), we're stacking taller so need reasonable support
+    const supportThreshold = strategy === 'lowest' ? 0.6 : strategy === 'stable' ? 0.8 : MIN_SUPPORT_PERCENTAGE;
+    const maxWeightOnFragile = strategy === 'lowest' ? 50 : strategy === 'stable' ? 20 : 30;
 
     // Check fragility: never place heavy boxes on fragile ones
     const maxFragilityBelow = Math.max(...layer.map(b => b.fragileRating || 5));
@@ -367,37 +364,35 @@ function packSinglePallet(boxes, pallet, strategy = 'hybrid') {
 
     let attemptCount = 0;
     const maxAttempts = 100;
+    const heightLimit = strategy === 'lowest' ? MAX_HEIGHT_FOOTPRINT_MODE : MAX_HEIGHT;
 
-    while (remaining.length > 0 && currentHeight < MAX_HEIGHT && attemptCount < maxAttempts) {
+    while (remaining.length > 0 && currentHeight < heightLimit && attemptCount < maxAttempts) {
         attemptCount++;
         
         // Group boxes by similar height for efficient layering
         const heightGroups = {};
         for (const box of remaining) {
-            // In "lowest" mode, use the minimum dimension as height
-            const h = strategy === 'lowest' ? 
-                Math.min(box.width, box.depth, box.height) : 
-                box.height;
+            const h = box.height;
             if (!heightGroups[h]) heightGroups[h] = [];
             heightGroups[h].push(box);
         }
 
-        // Pick the most common height group (or shortest in "lowest" mode)
+        // Pick the best height group based on strategy
         let bestGroup = null;
         let maxCount = 0;
-        let minHeight = Infinity;
         
         for (const [height, group] of Object.entries(heightGroups)) {
             const h = Number(height);
+            
             if (strategy === 'lowest') {
-                // Prefer shortest layers that can fit multiple boxes
-                if (h < minHeight || (h === minHeight && group.length > maxCount)) {
-                    minHeight = h;
+                // In "lowest" (minimize footprint) mode, prefer groups that maximize vertical space
+                // We want to stack HIGH, so any height is fine - just pick largest group
+                if (group.length > maxCount) {
                     maxCount = group.length;
                     bestGroup = { height: h, boxes: group };
                 }
             } else {
-                // Prefer most common height
+                // Standard mode - prefer most common height
                 if (group.length > maxCount) {
                     maxCount = group.length;
                     bestGroup = { height: h, boxes: group };
@@ -405,13 +400,13 @@ function packSinglePallet(boxes, pallet, strategy = 'hybrid') {
             }
         }
 
-        if (!bestGroup || currentHeight + bestGroup.height > MAX_HEIGHT) {
+        if (!bestGroup || currentHeight + bestGroup.height > heightLimit) {
             break; // Can't fit any more layers
         }
 
         // Try to pack this height group into a layer
         const layerOverhang = strategy === 'lowest' ? 
-            (layers.length === 0 ? 50 : 25) : // Minimize overhang in lowest mode
+            0 : // NO overhang in footprint mode - strict pallet bounds
             (layers.length === 0 ? OVERHANG_TOLERANCE * 2 : OVERHANG_TOLERANCE);
             
         const { placed, remaining: layerRemaining } = packLayer(
