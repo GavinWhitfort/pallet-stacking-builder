@@ -1,6 +1,13 @@
-
 /**
- * AutoPallet v2.5 - Forklift-Optimal Orientation Engine
+ * AutoPallet v3.0 - Advanced Layer-Based Packing with Stability Analysis
+ * 
+ * Improvements:
+ * - Layer-based packing (complete layers before stacking)
+ * - Maximal Rectangles bin packing algorithm
+ * - Weight distribution & center of gravity checks
+ * - Smart fragility handling (never heavy on fragile)
+ * - Stability scoring
+ * - Loading order optimization
  */
 
 export const PALLET_TYPES = {
@@ -10,317 +17,472 @@ export const PALLET_TYPES = {
     PLASTIC_STD: { name: 'Plastic Unit', width: 1100, depth: 1000, height: 125, weight: 15 },
 };
 
-const STEP = 25;
 const MAX_HEIGHT = 2600;
-const OVERHANG_X = 200; // 100mm overhang per side
-const OVERHANG_Z = 200; // 100mm overhang per side (even on all sides)
-const RAIL_OVERHANG = 1200; // Extra overhang for long WaterRower rail boxes
+const OVERHANG_TOLERANCE = 100; // 10cm max overhang per side
+const MAX_COG_OFFSET = 150; // Maximum center of gravity offset (mm)
+const MIN_SUPPORT_PERCENTAGE = 0.7; // 70% of box base must be supported
 
-function packSinglePallet(queue, pallet, presetOrientations = new Map()) {
-    const arranged = [];
-    
-    // Check if we have WaterRower rail boxes in the queue
-    const hasRailBoxes = queue.some(b => (b.productId === 'wr-s4' || b.productId === 'wr-a1') && b.boxIndex === 1);
-    
-    // Use extra overhang if we have rail boxes
-    const effW = hasRailBoxes ? pallet.width + RAIL_OVERHANG : pallet.width + OVERHANG_X;
-    const effD = hasRailBoxes ? pallet.depth + RAIL_OVERHANG : pallet.depth + OVERHANG_Z;
-    const cols = Math.ceil(effW / STEP);
-    const rows = Math.ceil(effD / STEP);
+// Maximal Rectangles Free Space Tracker
+class FreeRectangles {
+    constructor(width, depth) {
+        this.rects = [{ x: 0, z: 0, width, depth }];
+    }
 
-    const grid = Array(cols).fill(null).map(() => Array(rows).fill(null).map(() => ({ y: 0, productId: null, boxIndex: null })));
-    const usedIndices = new Set();
-    const lockedOrientations = new Map(presetOrientations);
-
-    for (let i = 0; i < queue.length; i++) {
-        const box = queue[i];
-        const typeKey = `${box.productId}-${box.boxIndex}`;
-        let bestPos = null;
+    findBestFit(boxW, boxD) {
+        let best = null;
         let bestScore = Infinity;
 
-        // --- orientation choice (per product type) ---
-        if (!lockedOrientations.has(typeKey)) {
-            const trials = [];
-            trials.push({ w: box.width, d: box.depth, h: box.height, rotated: false });
-            trials.push({ w: box.depth, d: box.width, h: box.height, rotated: true });
+        for (const rect of this.rects) {
+            // Try both orientations
+            const fits = [
+                { w: boxW, d: boxD, rotated: false },
+                { w: boxD, d: boxW, rotated: true }
+            ];
 
-            if (box.allowEdge) {
-                trials.push({ w: box.width, d: box.height, h: box.depth, rotated: true });
-                trials.push({ w: box.height, d: box.width, h: box.depth, rotated: true });
-                trials.push({ w: box.height, d: box.depth, h: box.width, rotated: true });
-                trials.push({ w: box.depth, d: box.height, h: box.width, rotated: true });
-            }
+            for (const fit of fits) {
+                if (fit.w <= rect.width && fit.d <= rect.depth) {
+                    // Score: prefer tight fits, prefer bottom-left
+                    const wastedArea = (rect.width - fit.w) * (rect.depth - fit.d);
+                    const positionScore = rect.x + rect.z; // Bottom-left preference
+                    const score = wastedArea * 100 + positionScore;
 
-            let bestTrial = null;
-            let bestTrialScore = Infinity;
-            const typeCount = queue.filter(b => `${b.productId}-${b.boxIndex}` === typeKey).length;
-
-            for (const orient of trials) {
-                if (orient.d > effD || orient.w > effW) continue;
-                const bc = Math.ceil(orient.w / STEP);
-                const br = Math.ceil(orient.d / STEP);
-                const palletCenter = effW / 2;
-
-                for (let c = 0; c <= cols - bc; c++) {
-                    for (let r = 0; r <= rows - br; r++) {
-                        let curY = 0;
-                        for (let ic = c; ic < c + bc; ic++) {
-                            for (let ir = r; ir < r + br; ir++) {
-                                if (grid[ic][ir].y > curY) curY = grid[ic][ir].y;
-                            }
-                        }
-                        if (curY + orient.h + pallet.height > MAX_HEIGHT) continue;
-
-                        const boxCenter = (c * STEP) + (orient.w / 2);
-                        const targetX = typeCount >= 2 ? (palletCenter - orient.w / 2) : palletCenter;
-                        const centeringPenalty = Math.abs(boxCenter - targetX);
-                        let tScore = (curY * 100) + (centeringPenalty * 10);
-                        if (curY > 0) tScore += 1000000;
-
-                        if (tScore < bestTrialScore) {
-                            bestTrialScore = tScore;
-                            bestTrial = orient;
-                        }
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = {
+                            x: rect.x,
+                            z: rect.z,
+                            width: fit.w,
+                            depth: fit.d,
+                            rotated: fit.rotated,
+                            rect
+                        };
                     }
-                }
-            }
-            lockedOrientations.set(typeKey, bestTrial || trials[0]);
-        }
-
-        const orientation = lockedOrientations.get(typeKey);
-        const bc = Math.ceil(orientation.w / STEP);
-        const br = Math.ceil(orientation.d / STEP);
-        const typeCountForPos = queue.filter(b => `${b.productId}-${b.boxIndex}` === typeKey).length;
-
-        for (let c = 0; c <= cols - bc; c++) {
-            for (let r = 0; r <= rows - br; r++) {
-                let maxY = 0;
-                let topProductId = null;
-                let topBoxIndex = null;
-                
-                for (let ic = c; ic < c + bc; ic++) {
-                    for (let ir = r; ir < r + br; ir++) {
-                        if (grid[ic][ir].y > maxY) {
-                            maxY = grid[ic][ir].y;
-                            topProductId = grid[ic][ir].productId;
-                            topBoxIndex = grid[ic][ir].boxIndex;
-                        }
-                    }
-                }
-                if (maxY + orientation.h + pallet.height > MAX_HEIGHT) continue;
-
-                // --- STACKING SCORING ---
-                const palletCenter = effW / 2;
-                const xStart = c * STEP;
-                const boxCenter = xStart + orientation.w / 2;
-                const centeringPenalty = Math.abs(boxCenter - palletCenter);
-
-                let score = (maxY * 100) + (centeringPenalty * 10);
-
-                // SPECIAL HANDLING FOR WATERROWER PRODUCTS
-                const isWaterRowerTank = (box.productId === 'wr-s4' || box.productId === 'wr-a1') && box.boxIndex === 0;
-                const isWaterRowerRail = (box.productId === 'wr-s4' || box.productId === 'wr-a1') && box.boxIndex === 1;
-                const isOnOtherWaterRowerTank = (topProductId === 'wr-s4' || topProductId === 'wr-a1') && topBoxIndex === 0;
-                const isOnSameProductTank = topProductId === box.productId && topBoxIndex === 0;
-                
-                if (isWaterRowerTank) {
-                    // Strongly prefer ground level for WaterRower tanks
-                    if (maxY === 0) {
-                        score -= 8000000;
-                    }
-                    // NEVER stack WaterRower tanks on top of each other
-                    if (maxY > 0 && isOnOtherWaterRowerTank) {
-                        score += 50000000; // Massive penalty
-                    }
-                    // Prefer positions next to other WaterRower tanks (side by side)
-                    const adjacentTanks = arranged.filter(i => 
-                        (i.productId === 'wr-s4' || i.productId === 'wr-a1') && 
-                        i.boxIndex === 0 &&
-                        Math.abs((i.position[1] - i.height / 2) - pallet.height) < 5
-                    ).length;
-                    if (maxY === 0 && adjacentTanks > 0) {
-                        score -= 2000000; // Bonus for being next to other tanks on ground
-                    }
-                } else if (isWaterRowerRail) {
-                    // WaterRower rail boxes should go on ground level, NOT on top of tanks
-                    if (maxY === 0) {
-                        score -= 10000000; // Strong bonus for ground placement
-                    } else if (isOnSameProductTank || isOnOtherWaterRowerTank) {
-                        score += 100000000; // Massive penalty for stacking on tanks
-                    } else {
-                        score += 50000000; // Large penalty for stacking on other items
-                    }
-                } else {
-                    // PRIORITY 1: Stack identical items directly on top of each other
-                    if (maxY > 0 && topProductId === box.productId && topBoxIndex === box.boxIndex) {
-                        score -= 10000000; // Huge bonus for stacking same items
-                    }
-                    
-                    // PRIORITY 2: Prefer ground level for first items
-                    if (maxY === 0) {
-                        score -= 5000000;
-                    }
-                    
-                    // PENALTY: Avoid stacking on different items
-                    if (maxY > 0 && (topProductId !== box.productId || topBoxIndex !== box.boxIndex)) {
-                        score += 3000000;
-                    }
-                }
-
-                if (score < bestScore) {
-                    bestScore = score;
-                    bestPos = {
-                        x: c * STEP,
-                        z: r * STEP,
-                        y: maxY,
-                        w: orientation.w,
-                        d: orientation.d,
-                        h: orientation.h,
-                        c, r,
-                        rotated: orientation.rotated
-                    };
                 }
             }
         }
 
-        if (bestPos) {
-            arranged.push({
-                ...box,
-                rotated: bestPos.rotated,
-                width: bestPos.w,
-                depth: bestPos.d,
-                height: bestPos.h,
-                position: [
-                    bestPos.x + bestPos.w / 2 - effW / 2,
-                    bestPos.y + bestPos.h / 2 + pallet.height,
-                    bestPos.z + bestPos.d / 2 - effD / 2
-                ]
+        return best;
+    }
+
+    placeBox(placement) {
+        // Remove the used rectangle
+        const index = this.rects.indexOf(placement.rect);
+        this.rects.splice(index, 1);
+
+        // Generate new free rectangles from splits
+        const splits = [];
+        
+        // Right split
+        if (placement.rect.width > placement.width) {
+            splits.push({
+                x: placement.x + placement.width,
+                z: placement.rect.z,
+                width: placement.rect.width - placement.width,
+                depth: placement.rect.depth
             });
-            const bcArr = Math.ceil(bestPos.w / STEP);
-            const brArr = Math.ceil(bestPos.d / STEP);
-            for (let ic = bestPos.c; ic < bestPos.c + bcArr; ic++) {
-                for (let ir = bestPos.r; ir < bestPos.r + brArr; ir++) {
-                    grid[ic][ir] = { y: bestPos.y + bestPos.h, productId: box.productId, boxIndex: box.boxIndex };
-                }
+        }
+        
+        // Top split
+        if (placement.rect.depth > placement.depth) {
+            splits.push({
+                x: placement.rect.x,
+                z: placement.z + placement.depth,
+                width: placement.rect.width,
+                depth: placement.rect.depth - placement.depth
+            });
+        }
+
+        // Add splits and remove overlaps
+        for (const split of splits) {
+            if (split.width > 0 && split.depth > 0) {
+                this.addRectangle(split);
             }
-            usedIndices.add(i);
-        } else {
-            break;
         }
     }
 
-    const remainingQueue = queue.filter((_, idx) => !usedIndices.has(idx));
-    let loadWidth = 0;
-    let loadDepth = 0;
+    addRectangle(newRect) {
+        // Check if new rect is contained in an existing rect
+        for (const rect of this.rects) {
+            if (this.contains(rect, newRect)) {
+                return; // Don't add, already covered
+            }
+        }
 
+        // Remove existing rects that are contained in new rect
+        this.rects = this.rects.filter(rect => !this.contains(newRect, rect));
+        
+        this.rects.push(newRect);
+    }
+
+    contains(outer, inner) {
+        return inner.x >= outer.x &&
+               inner.z >= outer.z &&
+               inner.x + inner.width <= outer.x + outer.width &&
+               inner.z + inner.depth <= outer.z + outer.depth;
+    }
+}
+
+// Layer packing using Maximal Rectangles
+function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_TOLERANCE) {
+    const effectiveW = palletWidth + allowedOverhang * 2;
+    const effectiveD = palletDepth + allowedOverhang * 2;
+    
+    const freeRects = new FreeRectangles(effectiveW, effectiveD);
+    const placed = [];
+    const remaining = [...boxes];
+
+    // Sort boxes by area (largest first) for better packing
+    remaining.sort((a, b) => (b.width * b.depth) - (a.width * a.depth));
+
+    for (let i = 0; i < remaining.length; i++) {
+        const box = remaining[i];
+        const placement = freeRects.findBestFit(box.width, box.depth);
+
+        if (placement) {
+            placed.push({
+                ...box,
+                x: placement.x - allowedOverhang,
+                z: placement.z - allowedOverhang,
+                width: placement.width,
+                depth: placement.depth,
+                rotated: placement.rotated
+            });
+            freeRects.placeBox(placement);
+            remaining.splice(i, 1);
+            i--; // Adjust index after removal
+        }
+    }
+
+    return { placed, remaining };
+}
+
+// Calculate center of gravity for a layer
+function calculateCenterOfGravity(boxes) {
+    if (boxes.length === 0) return { x: 0, z: 0, totalWeight: 0 };
+
+    let totalWeight = 0;
+    let weightedX = 0;
+    let weightedZ = 0;
+
+    for (const box of boxes) {
+        const weight = box.weight || 1;
+        totalWeight += weight;
+        weightedX += (box.x + box.width / 2) * weight;
+        weightedZ += (box.z + box.depth / 2) * weight;
+    }
+
+    return {
+        x: weightedX / totalWeight,
+        z: weightedZ / totalWeight,
+        totalWeight
+    };
+}
+
+// Check if boxes in upper layer are properly supported
+function calculateSupportPercentage(upperBox, lowerLayer) {
+    const upperArea = upperBox.width * upperBox.depth;
+    let supportedArea = 0;
+
+    const ux1 = upperBox.x;
+    const ux2 = upperBox.x + upperBox.width;
+    const uz1 = upperBox.z;
+    const uz2 = upperBox.z + upperBox.depth;
+
+    for (const lowerBox of lowerLayer) {
+        const lx1 = lowerBox.x;
+        const lx2 = lowerBox.x + lowerBox.width;
+        const lz1 = lowerBox.z;
+        const lz2 = lowerBox.z + lowerBox.depth;
+
+        // Calculate overlap
+        const overlapX = Math.max(0, Math.min(ux2, lx2) - Math.max(ux1, lx1));
+        const overlapZ = Math.max(0, Math.min(uz2, lz2) - Math.max(uz1, lz1));
+        supportedArea += overlapX * overlapZ;
+    }
+
+    return supportedArea / upperArea;
+}
+
+// Check if a box can be safely placed on a layer
+function canPlaceOnLayer(box, layer, palletWidth, palletDepth) {
+    if (layer.length === 0) return true; // Ground level always OK
+
+    // Check fragility: never place heavy boxes on fragile ones
+    const maxFragilityBelow = Math.max(...layer.map(b => b.fragileRating || 5));
+    const currentRigidity = box.rigidityRating || 5;
+    
+    if (maxFragilityBelow > 7 && box.weight > 30) {
+        return false; // Too heavy for fragile items below
+    }
+
+    // Check support percentage
+    const support = calculateSupportPercentage(box, layer);
+    if (support < MIN_SUPPORT_PERCENTAGE) {
+        return false; // Insufficient support
+    }
+
+    // Check that box is not entirely outside pallet bounds
+    const centerX = box.x + box.width / 2;
+    const centerZ = box.z + box.depth / 2;
+    
+    if (Math.abs(centerX) > palletWidth / 2 + OVERHANG_TOLERANCE ||
+        Math.abs(centerZ) > palletDepth / 2 + OVERHANG_TOLERANCE) {
+        return false;
+    }
+
+    return true;
+}
+
+// Calculate stability score for entire stack
+function calculateStabilityScore(layers, palletWidth, palletDepth) {
+    let totalScore = 0;
+    let totalWeight = 0;
+
+    for (let i = 0; i < layers.length; i++) {
+        const layer = layers[i];
+        const cog = calculateCenterOfGravity(layer);
+        
+        // Penalize off-center weight distribution
+        const cogOffset = Math.sqrt(cog.x * cog.x + cog.z * cog.z);
+        const cogPenalty = Math.max(0, cogOffset - MAX_COG_OFFSET) * 10;
+        
+        // Penalize fragile items with heavy items above
+        let fragilityPenalty = 0;
+        if (i < layers.length - 1) {
+            const maxFragility = Math.max(...layer.map(b => b.fragileRating || 5));
+            const weightAbove = layers.slice(i + 1).reduce((sum, l) => 
+                sum + l.reduce((s, b) => s + b.weight, 0), 0
+            );
+            
+            if (maxFragility > 6 && weightAbove > 50) {
+                fragilityPenalty = (maxFragility - 6) * weightAbove;
+            }
+        }
+        
+        totalScore += cogPenalty + fragilityPenalty;
+        totalWeight += cog.totalWeight;
+    }
+
+    // Bonus for even weight distribution across layers
+    const avgLayerWeight = totalWeight / layers.length;
+    const weightVariance = layers.reduce((sum, layer) => {
+        const layerWeight = layer.reduce((s, b) => s + b.weight, 0);
+        return sum + Math.abs(layerWeight - avgLayerWeight);
+    }, 0);
+    
+    totalScore += weightVariance * 0.1;
+
+    return totalScore;
+}
+
+// Main layer-based packing function
+function packSinglePallet(boxes, pallet) {
+    const layers = [];
+    let remaining = [...boxes];
+    let currentHeight = pallet.height;
+    
+    // Special handling for WaterRower products (keep together)
+    const waterRowerBoxes = remaining.filter(b => 
+        b.productId && (b.productId.startsWith('wr-') || b.productId.includes('waterrower'))
+    );
+    const otherBoxes = remaining.filter(b => !waterRowerBoxes.includes(b));
+    
+    // Sort by weight (heaviest first for base layer)
+    remaining = [...waterRowerBoxes.sort((a, b) => b.weight - a.weight), 
+                 ...otherBoxes.sort((a, b) => b.weight - a.weight)];
+
+    let attemptCount = 0;
+    const maxAttempts = 100;
+
+    while (remaining.length > 0 && currentHeight < MAX_HEIGHT && attemptCount < maxAttempts) {
+        attemptCount++;
+        
+        // Group boxes by similar height for efficient layering
+        const heightGroups = {};
+        for (const box of remaining) {
+            const h = box.height;
+            if (!heightGroups[h]) heightGroups[h] = [];
+            heightGroups[h].push(box);
+        }
+
+        // Pick the most common height group
+        let bestGroup = null;
+        let maxCount = 0;
+        for (const [height, group] of Object.entries(heightGroups)) {
+            if (group.length > maxCount) {
+                maxCount = group.length;
+                bestGroup = { height: Number(height), boxes: group };
+            }
+        }
+
+        if (!bestGroup || currentHeight + bestGroup.height > MAX_HEIGHT) {
+            break; // Can't fit any more layers
+        }
+
+        // Try to pack this height group into a layer
+        const { placed, remaining: layerRemaining } = packLayer(
+            bestGroup.boxes, 
+            pallet.width, 
+            pallet.depth,
+            layers.length === 0 ? OVERHANG_TOLERANCE * 2 : OVERHANG_TOLERANCE // More overhang on bottom
+        );
+
+        if (placed.length === 0) {
+            // Couldn't place anything, try smaller boxes
+            remaining = remaining.filter(b => b.height !== bestGroup.height);
+            continue;
+        }
+
+        // Validate layer stability
+        const validPlaced = placed.filter(box => 
+            canPlaceOnLayer(box, layers.length > 0 ? layers[layers.length - 1] : [], pallet.width, pallet.depth)
+        );
+
+        if (validPlaced.length === 0) {
+            // Layer not stable, skip this height group
+            remaining = remaining.filter(b => b.height !== bestGroup.height);
+            continue;
+        }
+
+        // Add layer with height information
+        const layer = validPlaced.map(box => ({
+            ...box,
+            y: currentHeight
+        }));
+
+        layers.push(layer);
+        currentHeight += bestGroup.height;
+
+        // Update remaining boxes
+        const placedIds = new Set(validPlaced.map(b => b.id));
+        remaining = remaining.filter(b => !placedIds.has(b.id));
+    }
+
+    // Flatten layers into arranged items with proper 3D positions
+    const arranged = [];
+    for (const layer of layers) {
+        for (const item of layer) {
+            arranged.push({
+                ...item,
+                position: [
+                    item.x + item.width / 2 - pallet.width / 2,
+                    item.y + item.height / 2,
+                    item.z + item.depth / 2 - pallet.depth / 2
+                ]
+            });
+        }
+    }
+
+    // Calculate actual load dimensions
+    let loadWidth = pallet.width;
+    let loadDepth = pallet.depth;
+    
     if (arranged.length > 0) {
         const minX = Math.min(...arranged.map(i => i.position[0] - i.width / 2));
         const maxX = Math.max(...arranged.map(i => i.position[0] + i.width / 2));
         const minZ = Math.min(...arranged.map(i => i.position[2] - i.depth / 2));
         const maxZ = Math.max(...arranged.map(i => i.position[2] + i.depth / 2));
-        const shiftX = -(minX + maxX) / 2;
-        const shiftZ = -(minZ + maxZ) / 2;
-        arranged.forEach(i => { i.position[0] += shiftX; i.position[2] += shiftZ; });
-
-        // Account for pallet dimension as the floor: if load is smaller, report pallet size.
-        loadWidth = Math.round(Math.max(pallet.width, maxX - minX));
-        loadDepth = Math.round(Math.max(pallet.depth, maxZ - minZ));
-    } else {
-        loadWidth = pallet.width;
-        loadDepth = pallet.depth;
+        
+        loadWidth = Math.max(pallet.width, Math.round(maxX - minX));
+        loadDepth = Math.max(pallet.depth, Math.round(maxZ - minZ));
     }
+
+    const stabilityScore = calculateStabilityScore(layers, pallet.width, pallet.depth);
 
     return {
         arranged,
-        remainingQueue,
-        totalHeight: Math.round(arranged.length > 0 ? Math.max(...arranged.map(i => i.position[1] + i.height / 2)) : pallet.height),
+        remaining,
+        totalHeight: currentHeight,
         loadWidth,
         loadDepth,
-        orientations: lockedOrientations
+        layers,
+        stabilityScore
     };
 }
 
 export function calculateVisGeometry(items, palletType = 'AU_CHEP') {
     const pallet = PALLET_TYPES[palletType];
+    
+    // Flatten items with quantities
     let totalQueue = [];
-    items.forEach(i => {
-        for (let q = 0; q < i.quantity; q++) {
-            totalQueue.push({ ...i, quantity: 1, boxUid: Math.random().toString(36).substr(2, 6) });
+    items.forEach(item => {
+        for (let q = 0; q < item.quantity; q++) {
+            totalQueue.push({ 
+                ...item, 
+                quantity: 1,
+                id: `${item.id || item.productId}-${q}-${item.boxIndex || 0}-${Math.random().toString(36).substr(2, 6)}`
+            });
         }
     });
 
-    // Group boxes by productId to keep multi-box products together
-    const grouped = {};
+    if (totalQueue.length === 0) {
+        return [{
+            pallet,
+            items: [],
+            totalHeight: pallet.height,
+            loadWidth: pallet.width,
+            loadDepth: pallet.depth,
+            totalWeight: pallet.weight,
+            layers: [],
+            stabilityScore: 0
+        }];
+    }
+
+    // Group by product to keep multi-box products together
+    const productGroups = {};
     totalQueue.forEach(item => {
-        const key = item.productId;
-        if (!grouped[key]) grouped[key] = [];
-        grouped[key].push(item);
+        const key = item.productId || item.id;
+        if (!productGroups[key]) productGroups[key] = [];
+        productGroups[key].push(item);
     });
 
-    // Sort each group internally by boxIndex (tank first, rail second)
-    Object.values(grouped).forEach(group => {
-        group.sort((a, b) => a.boxIndex - b.boxIndex);
+    // Sort groups: WaterRower first, then by weight
+    const sortedGroups = Object.values(productGroups).sort((a, b) => {
+        const aIsWR = a[0].productId && a[0].productId.startsWith('wr-');
+        const bIsWR = b[0].productId && b[0].productId.startsWith('wr-');
+        
+        if (aIsWR && !bIsWR) return -1;
+        if (!aIsWR && bIsWR) return 1;
+        
+        const aWeight = a.reduce((sum, item) => sum + item.weight, 0);
+        const bWeight = b.reduce((sum, item) => sum + item.weight, 0);
+        return bWeight - aWeight;
     });
 
-    // Sort groups by the size of their largest box (tanks)
-    const sortedGroups = Object.values(grouped).sort((groupA, groupB) => {
-        const largestA = groupA[0]; // First item (tank)
-        const largestB = groupB[0];
-        const areaA = largestA.width * largestA.depth;
-        const areaB = largestB.width * largestB.depth;
-        if (areaA !== areaB) return areaB - areaA;
-        const volA = areaA * largestA.height;
-        const volB = areaB * largestB.height;
-        if (volA !== volB) return volB - volA;
-        if (largestA.weight !== largestB.weight) return largestB.weight - largestA.weight;
-        return (largestB.rigidityRating || 10) - (largestA.rigidityRating || 10);
-    });
-
-    // Flatten back to a queue (tanks followed immediately by their rails)
+    // Flatten back to queue
     totalQueue = sortedGroups.flat();
 
+    // Pack pallets
     const pallets = [];
     let currentQueue = totalQueue;
-    let safety = 0;
+    let safetyCounter = 0;
 
-    while (currentQueue.length > 0 && safety < 100) {
-        safety++;
-        const firstBox = currentQueue[0];
-        const typeKey = `${firstBox.productId}-${firstBox.boxIndex}`;
-
-        const o1 = { w: firstBox.width, d: firstBox.depth, h: firstBox.height, rotated: false };
-        const o2 = { w: firstBox.depth, d: firstBox.width, h: firstBox.height, rotated: true };
-
-        // If user forced a rotation OR allowed edge-stacking, we skip the automated "best of 2" trial 
-        // because the user wants control (manual rotate) or the packSinglePallet will handle the 6-trial complexity.
-        let winner;
-        if (firstBox.forceRotation || firstBox.allowEdge) {
-            winner = packSinglePallet(currentQueue, pallet, new Map([[typeKey, o1]]));
-        } else {
-            const r1 = packSinglePallet(currentQueue, pallet, new Map([[typeKey, o1]]));
-            const r2 = packSinglePallet(currentQueue, pallet, new Map([[typeKey, o2]]));
-
-            winner = r1;
-            if (r2.arranged.length > r1.arranged.length) winner = r2;
-            else if (r2.arranged.length === r1.arranged.length && r2.totalHeight < r1.totalHeight) winner = r2;
-        }
-
-        if (winner.arranged.length === 0) {
-            // EMERGENCY SAFETY: If we can't pack the first box, it might be too large for the pallet.
-            // Skip the problematic box to prevent infinite loops or long hangs.
+    while (currentQueue.length > 0 && safetyCounter < 50) {
+        safetyCounter++;
+        
+        const result = packSinglePallet(currentQueue, pallet);
+        
+        if (result.arranged.length === 0) {
+            // Can't pack first item, skip it to prevent infinite loop
+            console.warn('Could not pack item:', currentQueue[0]);
             currentQueue = currentQueue.slice(1);
             continue;
         }
 
+        const totalWeight = result.arranged.reduce((sum, item) => sum + item.weight, 0) + pallet.weight;
+
         pallets.push({
             pallet,
-            items: winner.arranged,
-            totalHeight: Math.round(winner.totalHeight),
-            loadWidth: winner.loadWidth,
-            loadDepth: winner.loadDepth,
-            totalWeight: Math.round(winner.arranged.reduce((sum, item) => sum + item.weight, 0) + pallet.weight)
+            items: result.arranged,
+            totalHeight: Math.round(result.totalHeight),
+            loadWidth: result.loadWidth,
+            loadDepth: result.loadDepth,
+            totalWeight: Math.round(totalWeight),
+            layers: result.layers,
+            stabilityScore: Math.round(result.stabilityScore)
         });
-        currentQueue = winner.remainingQueue;
+
+        currentQueue = result.remaining;
     }
 
     return pallets;

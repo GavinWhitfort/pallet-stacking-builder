@@ -307,6 +307,14 @@ function App() {
 
           <div className="vis-overlay">
             <span className="badge">Pallet: <strong>{(PALLET_TYPES[palletType].width / 10).toFixed(1)}x{(PALLET_TYPES[palletType].depth / 10).toFixed(1)} cm</strong></span>
+            {visData.layers && visData.layers.length > 0 && (
+              <span className="badge" style={{ 
+                background: visData.stabilityScore < 100 ? '#10b981' : visData.stabilityScore < 500 ? '#eab308' : '#ef4444',
+                marginLeft: '8px'
+              }}>
+                {visData.layers.length} layers • Stability: {visData.stabilityScore < 100 ? 'A+' : visData.stabilityScore < 500 ? 'B' : 'C'}
+              </span>
+            )}
           </div>
 
           {allPallets.length > 1 && (
@@ -456,6 +464,17 @@ function App() {
               <div className="stat"><span>Total Weight:</span> <strong>{summary.totalWeight.toFixed(1)} kg</strong></div>
               <div className="stat"><span>Total Pallets:</span> <strong>{summary.palletCount}</strong></div>
               <div className="stat full-width"><span>Load Dims:</span> <strong>W:{(visData.loadWidth / 10).toFixed(1)} D:{(visData.loadDepth / 10).toFixed(1)} H:{(visData.totalHeight / 10).toFixed(1)} cm</strong></div>
+              {visData.layers && visData.layers.length > 0 && (
+                <>
+                  <div className="stat"><span>Layers:</span> <strong>{visData.layers.length}</strong></div>
+                  <div className="stat">
+                    <span>Stability:</span> 
+                    <strong style={{ color: visData.stabilityScore < 100 ? '#10b981' : visData.stabilityScore < 500 ? '#eab308' : '#ef4444' }}>
+                      {visData.stabilityScore < 100 ? '✓ Excellent' : visData.stabilityScore < 500 ? '⚠ Fair' : '✗ Poor'}
+                    </strong>
+                  </div>
+                </>
+              )}
             </div>
           </section>
 
