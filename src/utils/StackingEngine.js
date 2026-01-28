@@ -14,11 +14,17 @@ const STEP = 25;
 const MAX_HEIGHT = 2600;
 const OVERHANG_X = 200; // 100mm overhang per side
 const OVERHANG_Z = 200; // 100mm overhang per side (even on all sides)
+const RAIL_OVERHANG = 1200; // Extra overhang for long WaterRower rail boxes
 
 function packSinglePallet(queue, pallet, presetOrientations = new Map()) {
     const arranged = [];
-    const effW = pallet.width + OVERHANG_X;
-    const effD = pallet.depth + OVERHANG_Z;
+    
+    // Check if we have WaterRower rail boxes in the queue
+    const hasRailBoxes = queue.some(b => (b.productId === 'wr-s4' || b.productId === 'wr-a1') && b.boxIndex === 1);
+    
+    // Use extra overhang if we have rail boxes
+    const effW = hasRailBoxes ? pallet.width + RAIL_OVERHANG : pallet.width + OVERHANG_X;
+    const effD = hasRailBoxes ? pallet.depth + RAIL_OVERHANG : pallet.depth + OVERHANG_Z;
     const cols = Math.ceil(effW / STEP);
     const rows = Math.ceil(effD / STEP);
 
@@ -111,9 +117,11 @@ function packSinglePallet(queue, pallet, presetOrientations = new Map()) {
 
                 let score = (maxY * 100) + (centeringPenalty * 10);
 
-                // SPECIAL: WaterRower tank boxes (S4 and A1 box 0) should go side-by-side on ground
+                // SPECIAL HANDLING FOR WATERROWER PRODUCTS
                 const isWaterRowerTank = (box.productId === 'wr-s4' || box.productId === 'wr-a1') && box.boxIndex === 0;
+                const isWaterRowerRail = (box.productId === 'wr-s4' || box.productId === 'wr-a1') && box.boxIndex === 1;
                 const isOnOtherWaterRowerTank = (topProductId === 'wr-s4' || topProductId === 'wr-a1') && topBoxIndex === 0;
+                const isOnSameProductTank = topProductId === box.productId && topBoxIndex === 0;
                 
                 if (isWaterRowerTank) {
                     // Strongly prefer ground level for WaterRower tanks
@@ -132,6 +140,15 @@ function packSinglePallet(queue, pallet, presetOrientations = new Map()) {
                     ).length;
                     if (maxY === 0 && adjacentTanks > 0) {
                         score -= 2000000; // Bonus for being next to other tanks on ground
+                    }
+                } else if (isWaterRowerRail) {
+                    // WaterRower rail boxes MUST stack on top of their own tank
+                    if (maxY > 0 && isOnSameProductTank) {
+                        score -= 20000000; // Massive bonus for stacking on own tank
+                    } else if (maxY === 0) {
+                        score += 100000000; // Massive penalty for ground placement
+                    } else {
+                        score += 50000000; // Massive penalty for stacking on wrong items
                     }
                 } else {
                     // PRIORITY 1: Stack identical items directly on top of each other
@@ -232,16 +249,35 @@ export function calculateVisGeometry(items, palletType = 'AU_CHEP') {
         }
     });
 
-    totalQueue.sort((a, b) => {
-        const areaA = a.width * a.depth;
-        const areaB = b.width * b.depth;
-        if (areaA !== areaB) return areaB - areaA;
-        const volA = areaA * a.height;
-        const volB = areaB * b.height;
-        if (volA !== volB) return volB - volA;
-        if (a.weight !== b.weight) return b.weight - a.weight;
-        return (b.rigidityRating || 10) - (a.rigidityRating || 10);
+    // Group boxes by productId to keep multi-box products together
+    const grouped = {};
+    totalQueue.forEach(item => {
+        const key = item.productId;
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(item);
     });
+
+    // Sort each group internally by boxIndex (tank first, rail second)
+    Object.values(grouped).forEach(group => {
+        group.sort((a, b) => a.boxIndex - b.boxIndex);
+    });
+
+    // Sort groups by the size of their largest box (tanks)
+    const sortedGroups = Object.values(grouped).sort((groupA, groupB) => {
+        const largestA = groupA[0]; // First item (tank)
+        const largestB = groupB[0];
+        const areaA = largestA.width * largestA.depth;
+        const areaB = largestB.width * largestB.depth;
+        if (areaA !== areaB) return areaB - areaA;
+        const volA = areaA * largestA.height;
+        const volB = areaB * largestB.height;
+        if (volA !== volB) return volB - volA;
+        if (largestA.weight !== largestB.weight) return largestB.weight - largestA.weight;
+        return (largestB.rigidityRating || 10) - (largestA.rigidityRating || 10);
+    });
+
+    // Flatten back to a queue (tanks followed immediately by their rails)
+    totalQueue = sortedGroups.flat();
 
     const pallets = [];
     let currentQueue = totalQueue;
