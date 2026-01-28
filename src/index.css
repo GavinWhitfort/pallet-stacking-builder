@@ -355,24 +355,18 @@ body {
   cursor: pointer;
 }
 
-.quote-result {
+.quotes-container {
   margin-top: 15px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.3);
-  border-radius: 8px;
-  padding: 12px;
-  text-align: center;
 }
 
-.q-price {
-  font-size: 1.5rem;
-  font-weight: 800;
-  color: var(--accent);
+.quote-card {
+  transition: all 0.2s;
+  cursor: default;
 }
 
-.q-det {
-  font-size: 0.8rem;
-  color: var(--subtext);
+.quote-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .vis-overlay {
@@ -680,9 +674,13 @@ body {
     grid-column: span 1;
   }
 
-  .quote-result {
+  .quotes-container {
     width: 100%;
     box-sizing: border-box;
+  }
+
+  .quote-card {
+    margin-bottom: 12px;
   }
 
   /* Catalog groups */

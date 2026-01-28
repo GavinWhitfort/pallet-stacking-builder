@@ -236,18 +236,60 @@ function App() {
   };
 
   const calculateShipping = () => {
-    // Mock Calculation
     if (!postcode) return;
-    const baseRate = 50;
-    const weightRate = 0.5; // per kg
-    const distanceMult = postcode.startsWith('2') ? 1 : (postcode.startsWith('3') ? 1.5 : 2.5); // Mock zone logic
-
-    const cost = (baseRate + (summary.totalWeight * weightRate)) * distanceMult;
-    setShippingResult({
-      provider: 'Express Freight AU',
-      cost: cost.toFixed(2),
-      eta: distanceMult > 1.5 ? '4-5 Days' : '1-2 Days'
+    
+    // Zone calculation based on postcode
+    const zone = postcode.startsWith('2') ? 'metro' : 
+                 postcode.startsWith('3') ? 'regional' : 'remote';
+    
+    const zoneMultipliers = {
+      metro: 1,
+      regional: 1.4,
+      remote: 2.2
+    };
+    
+    const zoneMult = zoneMultipliers[zone];
+    const totalWeight = summary.totalWeight;
+    const palletCount = summary.palletCount;
+    
+    // Different pricing models for each carrier
+    const carriers = [
+      {
+        name: 'Direct Freight',
+        baseRate: 85,
+        perKg: 0.45,
+        perPallet: 65,
+        eta: zone === 'metro' ? '1-2 Days' : zone === 'regional' ? '3-4 Days' : '5-7 Days'
+      },
+      {
+        name: 'TFM',
+        baseRate: 95,
+        perKg: 0.38,
+        perPallet: 55,
+        eta: zone === 'metro' ? '1-3 Days' : zone === 'regional' ? '4-5 Days' : '6-8 Days'
+      },
+      {
+        name: 'Northline',
+        baseRate: 78,
+        perKg: 0.52,
+        perPallet: 70,
+        eta: zone === 'metro' ? '2-3 Days' : zone === 'regional' ? '4-6 Days' : '7-10 Days'
+      }
+    ];
+    
+    const quotes = carriers.map(carrier => {
+      const cost = (carrier.baseRate + (totalWeight * carrier.perKg) + (palletCount * carrier.perPallet)) * zoneMult;
+      return {
+        provider: carrier.name,
+        cost: cost.toFixed(2),
+        eta: carrier.eta
+      };
     });
+    
+    // Sort by price (cheapest first)
+    quotes.sort((a, b) => parseFloat(a.cost) - parseFloat(b.cost));
+    
+    setShippingResult(quotes);
   };
 
   return (
@@ -501,19 +543,59 @@ function App() {
               <button onClick={calculateShipping} className="calc-btn">Get Quote</button>
             </div>
             {shippingResult && (
-              <div className="quote-result">
-                <div className="q-price" style={{ marginBottom: '8px' }}>${shippingResult.cost} AUD</div>
-                <div className="q-det" style={{ marginBottom: '12px' }}>{shippingResult.provider} • {shippingResult.eta}</div>
-
-                <div className="load-details" style={{ fontSize: '0.75rem', borderTop: '1px solid #2c2e33', paddingTop: '8px' }}>
-                  <div style={{ color: '#9ca3af', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.65rem' }}>Load Dimensions</div>
+              <div className="quotes-container">
+                <div className="load-details" style={{ fontSize: '0.75rem', marginBottom: '16px', padding: '12px', background: 'rgba(0,0,0,0.3)', borderRadius: '8px' }}>
+                  <div style={{ color: '#9ca3af', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.65rem', fontWeight: 'bold' }}>Load Summary</div>
                   {summary.palletsDetail.map(p => (
-                    <div key={p.index} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px', whiteSpace: 'nowrap', gap: '8px' }}>
-                      <span style={{ flexShrink: 0 }}>Pallet {p.index}:</span>
-                      <strong style={{ color: '#fff', flexShrink: 0 }}>{p.dims} • {p.weight}kg</strong>
+                    <div key={p.index} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', fontSize: '0.8rem' }}>
+                      <span style={{ color: '#9ca3af' }}>Pallet {p.index}:</span>
+                      <strong style={{ color: '#fff' }}>{p.dims} • {p.weight.toFixed(1)}kg</strong>
                     </div>
                   ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.1)', fontWeight: 'bold' }}>
+                    <span style={{ color: '#9ca3af' }}>Total:</span>
+                    <strong style={{ color: 'var(--accent)' }}>{summary.totalWeight.toFixed(1)}kg • {summary.palletCount} pallet{summary.palletCount > 1 ? 's' : ''}</strong>
+                  </div>
                 </div>
+
+                <div style={{ color: '#9ca3af', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.65rem', fontWeight: 'bold' }}>Carrier Quotes</div>
+                {shippingResult.map((quote, idx) => (
+                  <div key={idx} className="quote-card" style={{
+                    background: idx === 0 ? 'rgba(59, 130, 246, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                    border: idx === 0 ? '2px solid rgba(59, 130, 246, 0.4)' : '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    marginBottom: '10px',
+                    position: 'relative'
+                  }}>
+                    {idx === 0 && (
+                      <div style={{
+                        position: 'absolute',
+                        top: '-8px',
+                        right: '12px',
+                        background: 'var(--accent)',
+                        color: '#fff',
+                        padding: '2px 8px',
+                        borderRadius: '10px',
+                        fontSize: '0.65rem',
+                        fontWeight: 'bold',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px'
+                      }}>
+                        Best Price
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                      <div style={{ fontWeight: 'bold', fontSize: '0.95rem', color: '#fff' }}>{quote.provider}</div>
+                      <div style={{ fontSize: '1.3rem', fontWeight: '800', color: idx === 0 ? 'var(--accent)' : '#fff' }}>
+                        ${quote.cost}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>
+                      Estimated delivery: <strong style={{ color: '#fff' }}>{quote.eta}</strong>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </section>
