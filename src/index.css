@@ -534,11 +534,16 @@ body {
 
   .controls {
     width: 100%;
+    min-width: 100%;
     border-right: none;
     border-bottom: 1px solid var(--border);
     padding: 15px;
     overflow-y: visible;
     max-height: none;
+  }
+
+  .controls * {
+    max-width: 100%;
   }
 
   .visualizer {
@@ -578,6 +583,12 @@ body {
   .catalog-btn {
     padding: 12px;
     font-size: 1rem;
+    width: 100%;
+  }
+
+  .catalog-grid,
+  .group-items {
+    width: 100%;
   }
 
   .qty-ctrl button {
@@ -593,10 +604,17 @@ body {
   /* Better card spacing */
   .card {
     padding: 12px;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .card h3 {
     font-size: 0.85rem;
+  }
+
+  .card > * {
+    width: 100%;
+    box-sizing: border-box;
   }
 
   /* Settings on mobile */
@@ -612,16 +630,23 @@ body {
   /* Inventory list more compact */
   .inventory-list {
     max-height: none;
+    width: 100%;
   }
 
   .inv-row {
     flex-wrap: wrap;
     gap: 8px;
+    width: 100%;
   }
 
   .inv-name {
     flex: 1 1 100%;
     margin-bottom: 4px;
+    font-size: 0.95rem;
+  }
+
+  .inv-item-container {
+    width: 100%;
   }
 
   /* Shipping inputs */
@@ -643,10 +668,20 @@ body {
   .stats {
     grid-template-columns: 1fr;
     font-size: 0.9rem;
+    width: 100%;
+  }
+
+  .stat {
+    width: 100%;
   }
 
   .stat.full-width {
     grid-column: span 1;
+  }
+
+  .quote-result {
+    width: 100%;
+    box-sizing: border-box;
   }
 
   /* Catalog groups */
@@ -658,6 +693,12 @@ body {
   /* Search input */
   input[type="text"] {
     font-size: 16px !important; /* Prevents zoom on iOS */
+    width: 100% !important;
+    box-sizing: border-box;
+  }
+
+  .search-container {
+    width: 100%;
   }
 
   /* Product settings */
