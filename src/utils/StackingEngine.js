@@ -17,8 +17,7 @@ export const PALLET_TYPES = {
     PLASTIC_STD: { name: 'Plastic Unit', width: 1100, depth: 1000, height: 125, weight: 15 },
 };
 
-const MAX_HEIGHT = 2600;
-const MAX_HEIGHT_FOOTPRINT_MODE = 3500; // Allow taller stacks when minimizing footprint
+const MAX_HEIGHT = 2100; // 2.1m max height per pallet
 const OVERHANG_TOLERANCE = 100; // 10cm max overhang per side
 const MAX_COG_OFFSET = 150; // Maximum center of gravity offset (mm)
 const MIN_SUPPORT_PERCENTAGE = 0.7; // 70% of box base must be supported
@@ -364,9 +363,8 @@ function packSinglePallet(boxes, pallet, strategy = 'hybrid') {
 
     let attemptCount = 0;
     const maxAttempts = 100;
-    const heightLimit = strategy === 'lowest' ? MAX_HEIGHT_FOOTPRINT_MODE : MAX_HEIGHT;
 
-    while (remaining.length > 0 && currentHeight < heightLimit && attemptCount < maxAttempts) {
+    while (remaining.length > 0 && currentHeight < MAX_HEIGHT && attemptCount < maxAttempts) {
         attemptCount++;
         
         // Group boxes by similar height for efficient layering
@@ -400,7 +398,7 @@ function packSinglePallet(boxes, pallet, strategy = 'hybrid') {
             }
         }
 
-        if (!bestGroup || currentHeight + bestGroup.height > heightLimit) {
+        if (!bestGroup || currentHeight + bestGroup.height > MAX_HEIGHT) {
             break; // Can't fit any more layers
         }
 
