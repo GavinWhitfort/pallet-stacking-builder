@@ -128,12 +128,48 @@ function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_T
     const effectiveW = strategy === 'lowest' ? palletWidth : palletWidth + allowedOverhang * 2;
     const effectiveD = strategy === 'lowest' ? palletDepth : palletDepth + allowedOverhang * 2;
     
-    const freeRects = new FreeRectangles(effectiveW, effectiveD);
     const placed = [];
     const remaining = [...boxes];
 
     // Sort boxes by area (largest first) for better packing
     remaining.sort((a, b) => (b.width * b.depth) - (a.width * a.depth));
+    
+    // Special case: single box - center it immediately
+    if (boxes.length === 1) {
+        const box = boxes[0];
+        // Try both orientations
+        const orientations = [
+            { w: box.width, d: box.depth, h: box.height, rotated: false },
+            { w: box.depth, d: box.width, h: box.height, rotated: true }
+        ];
+        
+        let best = orientations[0];
+        if (strategy === 'lowest') {
+            // Pick orientation that fits better or is taller
+            for (const orient of orientations) {
+                if (orient.w <= effectiveW && orient.d <= effectiveD) {
+                    if (orient.h > best.h || (orient.h === best.h && orient.w <= effectiveW && orient.d <= effectiveD)) {
+                        best = orient;
+                    }
+                }
+            }
+        }
+        
+        // Center the box
+        placed.push({
+            ...box,
+            x: -best.w / 2,
+            z: -best.d / 2,
+            width: best.w,
+            depth: best.d,
+            height: best.h,
+            rotated: best.rotated
+        });
+        
+        return { placed, remaining: [] };
+    }
+    
+    const freeRects = new FreeRectangles(effectiveW, effectiveD);
 
     for (let i = 0; i < remaining.length; i++) {
         const box = remaining[i];
@@ -499,15 +535,15 @@ function packSinglePallet(boxes, pallet, strategy = 'hybrid') {
             arranged.push({
                 ...item,
                 position: [
-                    item.x + item.width / 2 - pallet.width / 2,
+                    item.x + item.width / 2,
                     item.y + item.height / 2,
-                    item.z + item.depth / 2 - pallet.depth / 2
+                    item.z + item.depth / 2
                 ]
             });
         }
     }
 
-    // Calculate actual load dimensions
+    // Calculate actual load dimensions and center the load on the pallet
     let loadWidth = pallet.width;
     let loadDepth = pallet.depth;
     
@@ -519,6 +555,17 @@ function packSinglePallet(boxes, pallet, strategy = 'hybrid') {
         
         loadWidth = Math.max(pallet.width, Math.round(maxX - minX));
         loadDepth = Math.max(pallet.depth, Math.round(maxZ - minZ));
+        
+        // Center the entire load on the pallet
+        const loadCenterX = (minX + maxX) / 2;
+        const loadCenterZ = (minZ + maxZ) / 2;
+        const offsetX = -loadCenterX;
+        const offsetZ = -loadCenterZ;
+        
+        arranged.forEach(item => {
+            item.position[0] += offsetX;
+            item.position[2] += offsetZ;
+        });
     }
 
     const stabilityScore = calculateStabilityScore(layers, pallet.width, pallet.depth);
