@@ -392,6 +392,32 @@ function PalletBase({ pallet }) {
 }
 
 function BoxItem({ item }) {
+    // Extract short label from product name (e.g., "WaterRower S4" -> "S4")
+    const getShortLabel = (name) => {
+        if (!name) return '?';
+        
+        // Handle specific product patterns
+        if (name.includes('SlimBeam')) return 'SLIM';
+        if (name.includes('Sprintbok')) return 'SPRINT';
+        if (name.includes('NOHrD Bike')) return 'BIKE';
+        if (name.includes('Jumpsport')) {
+            const match = name.match(/\d+/); // Extract number
+            return match ? `JS${match[0]}` : 'JS';
+        }
+        if (name.includes('PD Rower')) return 'PD-R';
+        if (name.includes('PD Bike')) return 'PD-B';
+        
+        // Default: Extract the last word/code
+        const parts = name.split(' ');
+        return parts[parts.length - 1] || name.substring(0, 6).toUpperCase();
+    };
+    
+    const label = getShortLabel(item.name);
+    const fontSize = Math.min(item.width, item.height, item.depth) * 0.12; // Scale based on smallest dimension
+    const minSize = 25;
+    const maxSize = 70;
+    const finalFontSize = Math.max(minSize, Math.min(maxSize, fontSize));
+    
     return (
         <mesh position={item.position}>
             <boxGeometry args={[item.width, item.height, item.depth]} />
@@ -400,17 +426,84 @@ function BoxItem({ item }) {
                 <edgesGeometry args={[new THREE.BoxGeometry(item.width, item.height, item.depth)]} />
                 <lineBasicMaterial color="#000" linewidth={1} />
             </lineSegments>
-            {item.width > 200 && (
-                <React.Fragment>
-                    {/* Main Label */}
-                    <Text position={[0, 0, item.depth / 2 + 1]} fontSize={36} color="black" maxWidth={item.width * 0.9} textAlign="center">
-                        {item.name}
-                    </Text>
-                    <Text position={[0, 0, -item.depth / 2 - 1]} rotation={[0, Math.PI, 0]} fontSize={36} color="black" maxWidth={item.width * 0.9} textAlign="center">
-                        {item.name}
-                    </Text>
-                </React.Fragment>
-            )}
+            
+            {/* Labels on all 6 sides */}
+            {/* Front Face (+Z) */}
+            <Text 
+                position={[0, 0, item.depth / 2 + 1]} 
+                fontSize={finalFontSize} 
+                color="#000" 
+                fontWeight={900}
+                anchorX="center" 
+                anchorY="middle"
+            >
+                {label}
+            </Text>
+            
+            {/* Back Face (-Z) */}
+            <Text 
+                position={[0, 0, -item.depth / 2 - 1]} 
+                rotation={[0, Math.PI, 0]} 
+                fontSize={finalFontSize} 
+                color="#000" 
+                fontWeight={900}
+                anchorX="center" 
+                anchorY="middle"
+            >
+                {label}
+            </Text>
+            
+            {/* Right Face (+X) */}
+            <Text 
+                position={[item.width / 2 + 1, 0, 0]} 
+                rotation={[0, Math.PI / 2, 0]} 
+                fontSize={finalFontSize} 
+                color="#000" 
+                fontWeight={900}
+                anchorX="center" 
+                anchorY="middle"
+            >
+                {label}
+            </Text>
+            
+            {/* Left Face (-X) */}
+            <Text 
+                position={[-item.width / 2 - 1, 0, 0]} 
+                rotation={[0, -Math.PI / 2, 0]} 
+                fontSize={finalFontSize} 
+                color="#000" 
+                fontWeight={900}
+                anchorX="center" 
+                anchorY="middle"
+            >
+                {label}
+            </Text>
+            
+            {/* Top Face (+Y) */}
+            <Text 
+                position={[0, item.height / 2 + 1, 0]} 
+                rotation={[-Math.PI / 2, 0, 0]} 
+                fontSize={finalFontSize} 
+                color="#000" 
+                fontWeight={900}
+                anchorX="center" 
+                anchorY="middle"
+            >
+                {label}
+            </Text>
+            
+            {/* Bottom Face (-Y) */}
+            <Text 
+                position={[0, -item.height / 2 - 1, 0]} 
+                rotation={[Math.PI / 2, 0, 0]} 
+                fontSize={finalFontSize} 
+                color="#000" 
+                fontWeight={900}
+                anchorX="center" 
+                anchorY="middle"
+            >
+                {label}
+            </Text>
         </mesh>
     );
 }

@@ -145,6 +145,7 @@ function App() {
               id: `${item.id}-q${q}-box${boxIndex}`,
               productId: item.id,
               boxIndex: boxIndex,
+              name: product.name,
               color: product.color,
               quantity: 1
             });
