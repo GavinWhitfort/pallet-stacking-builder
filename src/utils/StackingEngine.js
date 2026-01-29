@@ -190,8 +190,8 @@ function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_T
         
         // In "lowest" mode (minimize footprint), try all orientations that fit within pallet
         let placement;
-        if (strategy === 'lowest') {
-            // All 6 possible orientations - we want to find ANY that fits within strict bounds
+        if (strategy === 'lowest' || isWaterRowerTank) {
+            // All 6 possible orientations for footprint mode OR tank boxes
             const orientations = [
                 { w: box.width, d: box.depth, h: box.height, desc: 'normal' },
                 { w: box.depth, d: box.width, h: box.height, desc: 'rotated' },
@@ -210,11 +210,19 @@ function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_T
                     tempPlacement.width <= effectiveW && 
                     tempPlacement.depth <= effectiveD) {
                     
+                    // For tank boxes, heavily penalize overhang
+                    let overhangPenalty = 0;
+                    if (isWaterRowerTank) {
+                        const xOverhang = Math.max(0, (tempPlacement.x + tempPlacement.width) - palletWidth);
+                        const zOverhang = Math.max(0, (tempPlacement.z + tempPlacement.depth) - palletDepth);
+                        overhangPenalty = (xOverhang + zOverhang) * 10000; // Huge penalty for overhang on tanks
+                    }
+                    
                     // Score: prefer orientations that maximize footprint usage (taller is better)
                     // We want to stack HIGH to minimize footprint
                     const heightScore = -orient.h; // Negative because we WANT tall orientations
                     const fitScore = (effectiveW - tempPlacement.width) + (effectiveD - tempPlacement.depth);
-                    const score = fitScore + heightScore * 0.1;
+                    const score = fitScore + heightScore * 0.1 + overhangPenalty;
                     
                     if (score < bestScore) {
                         bestScore = score;
@@ -499,8 +507,14 @@ function packSinglePallet(boxes, pallet, strategy = 'hybrid') {
         }
 
         // Try to pack this height group into a layer
+        // Check if this layer contains WaterRower tanks
+        const hasTanks = bestGroup.boxes.some(b => 
+            (b.productId === 'wr-s4' || b.productId === 'wr-a1') && b.boxIndex === 0
+        );
+        
         const layerOverhang = strategy === 'lowest' ? 
             0 : // NO overhang in footprint mode - strict pallet bounds
+            hasTanks ? 50 : // Minimal overhang for tank layers (5cm)
             (layers.length === 0 ? OVERHANG_TOLERANCE * 2 : OVERHANG_TOLERANCE);
             
         const { placed, remaining: layerRemaining } = packLayer(
