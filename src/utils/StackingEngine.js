@@ -174,6 +174,20 @@ function packLayer(boxes, palletWidth, palletDepth, allowedOverhang = OVERHANG_T
     for (let i = 0; i < remaining.length; i++) {
         const box = remaining[i];
         
+        // Check if this is a WaterRower tank box (S4 or A1, boxIndex 0)
+        const isWaterRowerTank = (box.productId === 'wr-s4' || box.productId === 'wr-a1') && box.boxIndex === 0;
+        
+        // Count how many WaterRower tanks are already in this layer
+        if (isWaterRowerTank) {
+            const tanksInLayer = placed.filter(p => 
+                (p.productId === 'wr-s4' || p.productId === 'wr-a1') && p.boxIndex === 0
+            ).length;
+            
+            if (tanksInLayer >= 2) {
+                continue; // Skip this box, max 2 tanks per layer
+            }
+        }
+        
         // In "lowest" mode (minimize footprint), try all orientations that fit within pallet
         let placement;
         if (strategy === 'lowest') {
