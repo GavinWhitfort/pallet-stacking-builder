@@ -70,48 +70,76 @@ function canStackOn(item, layerBelow) {
 
 /**
  * RULE #5: Group products - place multiples side by side
+ * Returns { placed, notPlaced } arrays
  */
 function layoutProductGroup(boxes, palletWidth, palletDepth, offsetX = 0, offsetZ = 0) {
-    const placed = [];
     const maxWidthAllowed = palletWidth + OVERHANG_SIDES * 2;
     const maxDepthAllowed = palletDepth + OVERHANG_FRONT_BACK * 2;
     
-    // Build rows
+    // Build rows - checking both width and depth constraints
     const rows = [];
     let currentRow = [];
     let currentRowWidth = 0;
+    let totalDepthUsed = 0;
+    let placedBoxes = [];
     
-    for (const box of boxes) {
+    for (let i = 0; i < boxes.length; i++) {
+        const box = boxes[i];
         const orient = getBestOrientation(box, palletWidth, palletDepth);
         if (!orient) continue;
         
         // Check if adding this box exceeds max width
         if (currentRowWidth + orient.w > maxWidthAllowed && currentRow.length > 0) {
+            // Check if we can fit another row depth-wise
+            const currentRowDepth = Math.max(...currentRow.map(b => b.depth));
+            if (totalDepthUsed + currentRowDepth + orient.d > maxDepthAllowed) {
+                // Can't fit more rows, stop here
+                break;
+            }
+            
             // Start new row
             rows.push(currentRow);
+            totalDepthUsed += currentRowDepth;
             currentRow = [];
             currentRowWidth = 0;
         }
         
-        currentRow.push({
+        const orientedBox = {
             ...box,
             width: orient.w,
             depth: orient.d,
             height: orient.h,
             rotated: orient.rotated
-        });
+        };
         
+        currentRow.push(orientedBox);
+        placedBoxes.push(box);
         currentRowWidth += orient.w;
     }
     
-    // Add last row
+    // Add last row if it fits
     if (currentRow.length > 0) {
-        rows.push(currentRow);
+        const currentRowDepth = Math.max(...currentRow.map(b => b.depth));
+        if (totalDepthUsed + currentRowDepth <= maxDepthAllowed) {
+            rows.push(currentRow);
+        } else {
+            // Last row doesn't fit, remove those boxes from placedBoxes
+            currentRow.forEach(box => {
+                const idx = placedBoxes.findIndex(b => b.id === box.id);
+                if (idx >= 0) placedBoxes.splice(idx, 1);
+            });
+        }
     }
     
-    // Now position each row, centered on pallet
-    let zOffset = -palletDepth / 2;
+    // Calculate total depth of all rows to center vertically
+    const totalRowsDepth = rows.reduce((sum, row) => {
+        return sum + Math.max(...row.map(box => box.depth));
+    }, 0);
     
+    // Start from center, offset by half the total depth
+    let zOffset = -totalRowsDepth / 2;
+    
+    const positioned = [];
     for (const row of rows) {
         const rowWidth = row.reduce((sum, box) => sum + box.width, 0);
         const rowDepth = Math.max(...row.map(box => box.depth));
@@ -120,7 +148,7 @@ function layoutProductGroup(boxes, palletWidth, palletDepth, offsetX = 0, offset
         let xOffset = -rowWidth / 2;
         
         for (const box of row) {
-            placed.push({
+            positioned.push({
                 ...box,
                 x: xOffset,
                 z: zOffset
@@ -131,7 +159,10 @@ function layoutProductGroup(boxes, palletWidth, palletDepth, offsetX = 0, offset
         zOffset += rowDepth;
     }
     
-    return placed;
+    // Return which boxes were placed and which weren't
+    const notPlaced = boxes.filter(box => !placedBoxes.includes(box));
+    
+    return { placed: positioned, notPlaced };
 }
 
 /**
@@ -220,22 +251,22 @@ function packSinglePallet(boxes, pallet) {
         }
         
         // Layout this product group
-        const placed = layoutProductGroup(productGroup, pallet.width, pallet.depth);
+        const layoutResult = layoutProductGroup(productGroup, pallet.width, pallet.depth);
         
-        if (placed.length === 0) {
+        if (layoutResult.placed.length === 0) {
             queueIndex += productGroup.length; // Skip this product
             continue;
         }
         
         // Add Y position
-        const layer = placed.map(item => ({
+        const layer = layoutResult.placed.map(item => ({
             ...item,
             y: currentHeight
         }));
         
         layers.push(layer);
         currentHeight += productGroup[0].height;
-        queueIndex += placed.length;
+        queueIndex += layoutResult.placed.length;
     }
     
     // Items that didn't fit
