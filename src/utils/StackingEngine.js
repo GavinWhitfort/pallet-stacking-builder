@@ -19,14 +19,28 @@ const MAX_HEIGHT = 2300; // 2.3m
 
 /**
  * RULE #3: Rotation to minimize footprint
- * Returns best orientation (normal or rotated 90°)
+ * Returns best orientation (normal or rotated 90°, or upright for rails)
  * Max 20cm overhang allowed
  */
 function getBestOrientation(box, palletWidth, palletDepth) {
+    // Check if this is a rail box (WaterRower boxIndex 1)
+    const isRail = box.boxIndex === 1 && 
+                   (box.productId === 'wr-s4' || box.productId === 'wr-a1');
+    
     const orientations = [
         { w: box.width, d: box.depth, h: box.height, rotated: false },
         { w: box.depth, d: box.width, h: box.height, rotated: true }
     ];
+    
+    // Rails can also stand upright (on their edge)
+    if (isRail) {
+        orientations.push(
+            { w: box.width, d: box.height, h: box.depth, rotated: 'upright-1' },
+            { w: box.height, d: box.width, h: box.depth, rotated: 'upright-2' },
+            { w: box.depth, d: box.height, h: box.width, rotated: 'upright-3' },
+            { w: box.height, d: box.depth, h: box.width, rotated: 'upright-4' }
+        );
+    }
     
     const maxWidth = palletWidth + MAX_OVERHANG * 2;
     const maxDepth = palletDepth + MAX_OVERHANG * 2;
@@ -245,25 +259,29 @@ function packSinglePallet(boxes, pallet) {
         if (!currentProduct) break;
         
         const productId = currentProduct.productId || currentProduct.id;
+        const currentBoxIndex = currentProduct.boxIndex || 0;
         
-        // RULE #5: Collect all boxes of this product that are next in queue
+        // RULE #5: Collect boxes of this product + boxIndex that are next in queue
+        // (Group by product AND box index to handle multi-box products)
         const productGroup = [];
         let i = queueIndex;
-        while (i < queue.length && (queue[i].productId || queue[i].id) === productId) {
+        while (i < queue.length && 
+               (queue[i].productId || queue[i].id) === productId &&
+               (queue[i].boxIndex || 0) === currentBoxIndex) {
             productGroup.push(queue[i]);
             i++;
         }
         
         // Check height limit
         if (currentHeight + productGroup[0].height > MAX_HEIGHT) {
-            queueIndex += productGroup.length; // Skip this product
+            queueIndex += productGroup.length; // Skip these boxes
             continue;
         }
         
         // Check if this product can stack on current layer
         const lastLayer = layers.length > 0 ? layers[layers.length - 1] : [];
         if (!canStackOn(productGroup[0], lastLayer)) {
-            queueIndex += productGroup.length; // Skip this product
+            queueIndex += productGroup.length; // Skip these boxes
             continue;
         }
         
@@ -271,7 +289,7 @@ function packSinglePallet(boxes, pallet) {
         const layoutResult = layoutProductGroup(productGroup, pallet.width, pallet.depth);
         
         if (layoutResult.placed.length === 0) {
-            queueIndex += productGroup.length; // Skip this product
+            queueIndex += productGroup.length; // Skip these boxes
             continue;
         }
         
@@ -283,7 +301,12 @@ function packSinglePallet(boxes, pallet) {
         
         layers.push(layer);
         currentHeight += productGroup[0].height;
+        
+        // Move queue forward by how many we successfully placed
         queueIndex += layoutResult.placed.length;
+        
+        // Items from productGroup that didn't fit remain in queue at current position
+        // They'll be tried again (and likely fail, going to remaining) or work later
     }
     
     // Items that didn't fit
