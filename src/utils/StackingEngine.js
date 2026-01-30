@@ -73,36 +73,62 @@ function canStackOn(item, layerBelow) {
  */
 function layoutProductGroup(boxes, palletWidth, palletDepth, offsetX = 0, offsetZ = 0) {
     const placed = [];
-    let currentX = offsetX - palletWidth / 2;
-    let currentZ = offsetZ - palletDepth / 2;
-    let maxRowHeight = 0;
+    const maxWidthAllowed = palletWidth + OVERHANG_SIDES * 2;
+    const maxDepthAllowed = palletDepth + OVERHANG_FRONT_BACK * 2;
+    
+    // Build rows
+    const rows = [];
+    let currentRow = [];
+    let currentRowWidth = 0;
     
     for (const box of boxes) {
         const orient = getBestOrientation(box, palletWidth, palletDepth);
-        if (!orient) continue; // Can't fit this box
+        if (!orient) continue;
         
-        // Check if we need to wrap to next row
-        const maxWidth = palletWidth + OVERHANG_SIDES * 2;
-        if (currentX + orient.w > palletWidth / 2 + OVERHANG_SIDES && placed.length > 0) {
-            // Move to next row
-            currentX = -palletWidth / 2;
-            currentZ += maxRowHeight;
-            maxRowHeight = 0;
+        // Check if adding this box exceeds max width
+        if (currentRowWidth + orient.w > maxWidthAllowed && currentRow.length > 0) {
+            // Start new row
+            rows.push(currentRow);
+            currentRow = [];
+            currentRowWidth = 0;
         }
         
-        // Place the box
-        placed.push({
+        currentRow.push({
             ...box,
-            x: currentX,
-            z: currentZ,
             width: orient.w,
             depth: orient.d,
             height: orient.h,
             rotated: orient.rotated
         });
         
-        currentX += orient.w;
-        maxRowHeight = Math.max(maxRowHeight, orient.d);
+        currentRowWidth += orient.w;
+    }
+    
+    // Add last row
+    if (currentRow.length > 0) {
+        rows.push(currentRow);
+    }
+    
+    // Now position each row, centered on pallet
+    let zOffset = -palletDepth / 2;
+    
+    for (const row of rows) {
+        const rowWidth = row.reduce((sum, box) => sum + box.width, 0);
+        const rowDepth = Math.max(...row.map(box => box.depth));
+        
+        // Center this row horizontally
+        let xOffset = -rowWidth / 2;
+        
+        for (const box of row) {
+            placed.push({
+                ...box,
+                x: xOffset,
+                z: zOffset
+            });
+            xOffset += box.width;
+        }
+        
+        zOffset += rowDepth;
     }
     
     return placed;
