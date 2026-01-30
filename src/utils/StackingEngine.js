@@ -272,12 +272,6 @@ function packSinglePallet(boxes, pallet) {
             i++;
         }
         
-        // Check height limit
-        if (currentHeight + productGroup[0].height > MAX_HEIGHT) {
-            queueIndex += productGroup.length; // Skip these boxes
-            continue;
-        }
-        
         // Check if this product can stack on current layer
         const lastLayer = layers.length > 0 ? layers[layers.length - 1] : [];
         if (!canStackOn(productGroup[0], lastLayer)) {
@@ -285,11 +279,18 @@ function packSinglePallet(boxes, pallet) {
             continue;
         }
         
-        // Layout this product group
+        // Layout this product group (determines orientation)
         const layoutResult = layoutProductGroup(productGroup, pallet.width, pallet.depth);
         
         if (layoutResult.placed.length === 0) {
             queueIndex += productGroup.length; // Skip these boxes
+            continue;
+        }
+        
+        // Check height limit AFTER orientation is determined
+        const layerHeight = layoutResult.placed[0].height;
+        if (currentHeight + layerHeight > MAX_HEIGHT) {
+            queueIndex += productGroup.length; // Skip these boxes - too tall
             continue;
         }
         
@@ -300,7 +301,7 @@ function packSinglePallet(boxes, pallet) {
         }));
         
         layers.push(layer);
-        currentHeight += productGroup[0].height;
+        currentHeight += layerHeight; // Use actual height after orientation
         
         // Move queue forward by how many we successfully placed
         queueIndex += layoutResult.placed.length;
