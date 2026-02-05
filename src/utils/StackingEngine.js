@@ -27,20 +27,26 @@ function getBestOrientation(box, palletWidth, palletDepth) {
     const isRail = box.boxIndex === 1 &&
         (box.productId === 'wr-s4' || box.productId === 'wr-a1');
 
-    const orientations = [
-        { w: box.width, d: box.depth, h: box.height, rotated: false },
-        { w: box.depth, d: box.width, h: box.height, rotated: true }
+    const baseOrientations = [
+        { w: box.width, d: box.depth, h: box.height, rotated: false, weightRatio: Math.max(box.width / box.height, box.depth / box.height) },
+        { w: box.depth, d: box.width, h: box.height, rotated: 'y-90', weightRatio: Math.max(box.depth / box.height, box.width / box.height) }
     ];
 
-    // Rails can also stand upright (on their edge)
-    if (isRail) {
-        orientations.push(
-            { w: box.width, d: box.height, h: box.depth, rotated: 'upright-1' },
-            { w: box.height, d: box.width, h: box.depth, rotated: 'upright-2' },
-            { w: box.depth, d: box.height, h: box.width, rotated: 'upright-3' },
-            { w: box.height, d: box.depth, h: box.width, rotated: 'upright-4' }
-        );
-    }
+    const sideOrientations = [
+        { w: box.width, d: box.height, h: box.depth, rotated: 'side-x', weightRatio: Math.max(box.width / box.depth, box.height / box.depth) },
+        { w: box.height, d: box.width, h: box.depth, rotated: 'side-x-90', weightRatio: Math.max(box.height / box.depth, box.width / box.depth) },
+        { w: box.depth, d: box.height, h: box.width, rotated: 'side-z', weightRatio: Math.max(box.depth / box.width, box.height / box.width) },
+        { w: box.height, d: box.depth, h: box.width, rotated: 'side-z-90', weightRatio: Math.max(box.height / box.width, box.depth / box.width) }
+    ];
+
+    // Combine orientations. We always allow side-flips if allowed by user OR if necessary to satisfy Gav's 2:1 rule.
+    let orientations = [...baseOrientations];
+    sideOrientations.forEach(o => {
+        // If it's a rail, or user allowed edges, or if flipping it lays it down (ratio > 2)
+        if (isRail || box.allowEdge || o.weightRatio >= 2) {
+            orientations.push(o);
+        }
+    });
 
     const maxWidth = palletWidth + MAX_OVERHANG * 2;
     const maxDepth = palletDepth + MAX_OVERHANG * 2;
@@ -52,8 +58,32 @@ function getBestOrientation(box, palletWidth, palletDepth) {
 
     if (validOrientations.length === 0) return null;
 
-    // Pick orientation that minimizes footprint (area)
-    validOrientations.sort((a, b) => (a.w * a.d) - (b.w * b.d));
+    // Pick orientation that maximizes stability (lay flat) then minimizes footprint
+    validOrientations.sort((a, b) => {
+        // GAV'S RULE: Lay boxes down if they exceed 2:1 width to height ratio
+        const exceedsA = a.weightRatio >= 2;
+        const exceedsB = b.weightRatio >= 2;
+
+        if (exceedsA && !exceedsB) return -1;
+        if (!exceedsA && exceedsB) return 1;
+
+        // If both exceed, prefer the one with the higher ratio (flatter)
+        if (exceedsA && exceedsB) {
+            if (Math.abs(a.weightRatio - b.weightRatio) > 0.5) {
+                return b.weightRatio - a.weightRatio;
+            }
+        }
+
+        // Secondary: If one is "tall" (H > W*2), penalize it
+        const isTallA = a.h > a.w * 2 || a.h > a.d * 2;
+        const isTallB = b.h > b.w * 2 || b.h > b.d * 2;
+
+        if (isTallA && !isTallB) return 1;
+        if (!isTallA && isTallB) return -1;
+
+        // Otherwise minimize footprint to fit more on layer
+        return (a.w * a.d) - (b.w * b.d);
+    });
 
     return validOrientations[0];
 }
