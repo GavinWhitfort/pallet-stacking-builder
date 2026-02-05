@@ -2,6 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Package, Truck, Box as BoxIcon, Trash2, Plus, Info, Search, Settings, Check, RotateCcw } from 'lucide-react';
 import Pallet3D from './components/Pallet3D';
+import ErrorBoundary from './components/ErrorBoundary';
 import { calculateVisGeometry, PALLET_TYPES } from './utils/StackingEngine';
 
 // Demo Catalog
@@ -338,7 +339,9 @@ function App() {
       <main className="main-grid">
         {/* Right 3D View */}
         <div className="visualizer">
-          <Pallet3D data={visData} hoveredItemId={hoveredItemId} onSelectItem={setHoveredItemId} />
+          <ErrorBoundary>
+            <Pallet3D data={visData} hoveredItemId={hoveredItemId} onSelectItem={setHoveredItemId} />
+          </ErrorBoundary>
 
           <div className="vis-overlay">
             <span className="badge">Pallet: <strong>{(PALLET_TYPES[palletType].width / 10).toFixed(1)}x{(PALLET_TYPES[palletType].depth / 10).toFixed(1)} cm</strong></span>
