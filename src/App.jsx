@@ -104,21 +104,52 @@ function App() {
   const [currentPalletIndex, setCurrentPalletIndex] = useState(0);
   const [productSettings, setProductSettings] = useState({}); // { 'productId-boxIndex': { width, depth, height, weight, allowEdge, forceRotation } }
   const [openSettingsId, setOpenSettingsId] = useState(null);
-  const [packingStrategy, setPackingStrategy] = useState('hybrid');
+  const [hoveredItemId, setHoveredItemId] = useState(null);
 
   const allPallets = useMemo(() => {
     const flattenedItems = [];
     let maxBoxes = 0;
+
+    // Calculate max boxes needed (custom items count as having 1 box)
     items.forEach(item => {
       const product = CATALOG.find(p => p.id === item.id);
-      if (product) maxBoxes = Math.max(maxBoxes, product.boxes.length);
+      if (product) {
+        maxBoxes = Math.max(maxBoxes, product.boxes.length);
+      } else {
+        // Assume custom item has 1 box
+        maxBoxes = Math.max(maxBoxes, 1);
+      }
     });
 
     for (let boxIndex = 0; boxIndex < maxBoxes; boxIndex++) {
       items.forEach(item => {
         const product = CATALOG.find(p => p.id === item.id);
-        if (product && product.boxes[boxIndex]) {
-          const baseBox = product.boxes[boxIndex];
+        let baseBox = null;
+        let pName = item.name;
+        let pColor = item.color;
+
+        if (product) {
+          if (product.boxes[boxIndex]) {
+            baseBox = product.boxes[boxIndex];
+            pName = product.name;
+            pColor = product.color;
+          }
+        } else if (boxIndex === 0) {
+          // Custom item - only has box index 0
+          // Item itself has dimensions for custom items
+          if (item.width && item.depth && item.height) {
+            baseBox = {
+              width: item.width,
+              depth: item.depth,
+              height: item.height,
+              weight: item.weight || 0,
+              fragileRating: 0,
+              rigidityRating: 10
+            };
+          }
+        }
+
+        if (baseBox) {
           const boxKey = `${item.id}-${boxIndex}`;
           const settings = productSettings[boxKey] || {};
 
@@ -145,8 +176,8 @@ function App() {
               id: `${item.id}-q${q}-box${boxIndex}`,
               productId: item.id,
               boxIndex: boxIndex,
-              name: product.name,
-              color: product.color,
+              name: pName,
+              color: pColor,
               quantity: 1
             });
           }
@@ -154,9 +185,9 @@ function App() {
       });
     }
 
-    const calculated = calculateVisGeometry(flattenedItems, palletType, packingStrategy);
+    const calculated = calculateVisGeometry(flattenedItems, palletType);
     return calculated;
-  }, [items, palletType, productSettings, packingStrategy]);
+  }, [items, palletType, productSettings]);
 
   const visData = useMemo(() => {
     if (allPallets.length === 0) {
@@ -167,7 +198,8 @@ function App() {
         loadWidth: p.width,
         loadDepth: p.depth,
         totalWeight: p.weight,
-        pallet: p
+        pallet: p,
+        efficiency: 0
       };
     }
     const safeIndex = Math.min(currentPalletIndex, allPallets.length - 1);
@@ -239,21 +271,21 @@ function App() {
 
   const calculateShipping = () => {
     if (!postcode) return;
-    
+
     // Zone calculation based on postcode
-    const zone = postcode.startsWith('2') ? 'metro' : 
-                 postcode.startsWith('3') ? 'regional' : 'remote';
-    
+    const zone = postcode.startsWith('2') ? 'metro' :
+      postcode.startsWith('3') ? 'regional' : 'remote';
+
     const zoneMultipliers = {
       metro: 1,
       regional: 1.4,
       remote: 2.2
     };
-    
+
     const zoneMult = zoneMultipliers[zone];
     const totalWeight = summary.totalWeight;
     const palletCount = summary.palletCount;
-    
+
     // Different pricing models for each carrier
     const carriers = [
       {
@@ -278,7 +310,7 @@ function App() {
         eta: zone === 'metro' ? '2-3 Days' : zone === 'regional' ? '4-6 Days' : '7-10 Days'
       }
     ];
-    
+
     const quotes = carriers.map(carrier => {
       const cost = (carrier.baseRate + (totalWeight * carrier.perKg) + (palletCount * carrier.perPallet)) * zoneMult;
       return {
@@ -287,10 +319,10 @@ function App() {
         eta: carrier.eta
       };
     });
-    
+
     // Sort by price (cheapest first)
     quotes.sort((a, b) => parseFloat(a.cost) - parseFloat(b.cost));
-    
+
     setShippingResult(quotes);
   };
 
@@ -299,22 +331,31 @@ function App() {
       <header className="header">
         <div className="logo">
           <img src="/logo.png" alt="WaterRower | NOHrD" style={{ height: '40px', filter: 'brightness(0) invert(1)' }} />
+          <span style={{ marginLeft: '12px', fontSize: '0.6rem', color: 'var(--accent)', border: '1px solid var(--accent)', padding: '2px 6px' }}>v1.1 LASER_LOGIC</span>
         </div>
       </header>
 
       <main className="main-grid">
         {/* Right 3D View */}
         <div className="visualizer">
-          <Pallet3D data={visData} />
+          <Pallet3D data={visData} hoveredItemId={hoveredItemId} onSelectItem={setHoveredItemId} />
 
           <div className="vis-overlay">
             <span className="badge">Pallet: <strong>{(PALLET_TYPES[palletType].width / 10).toFixed(1)}x{(PALLET_TYPES[palletType].depth / 10).toFixed(1)} cm</strong></span>
-            {visData.layers && visData.layers.length > 0 && (
-              <span className="badge" style={{ 
-                background: visData.stabilityScore < 100 ? '#10b981' : visData.stabilityScore < 500 ? '#eab308' : '#ef4444',
+
+            <span className="badge" style={{
+              background: visData.efficiency > 0.8 ? '#10b981' : visData.efficiency > 0.6 ? '#eab308' : '#ef4444',
+              marginLeft: '8px'
+            }}>
+              Efficiency: {(visData.efficiency * 100).toFixed(0)}%
+            </span>
+
+            {visData.items && visData.items.length > 0 && (
+              <span className="badge" style={{
+                background: visData.items.some(i => i.crushRisk > 0.7) ? '#ef4444' : '#10b981',
                 marginLeft: '8px'
               }}>
-                {visData.layers.length} layers • Stability: {visData.stabilityScore < 100 ? 'A+' : visData.stabilityScore < 500 ? 'B' : 'C'}
+                Safety: {visData.items.some(i => i.crushRisk > 0.7) ? 'CRUSH RISK' : 'SECURE'}
               </span>
             )}
           </div>
@@ -350,48 +391,6 @@ function App() {
               ))}
             </select>
 
-            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
-              <h3 style={{ fontSize: '0.9rem', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Settings size={16} /> Packing Strategy
-              </h3>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="2" 
-                  step="1" 
-                  value={packingStrategy === 'lowest' ? 0 : packingStrategy === 'hybrid' ? 1 : 2}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value);
-                    setPackingStrategy(val === 0 ? 'lowest' : val === 1 ? 'hybrid' : 'stable');
-                  }}
-                  style={{ 
-                    flex: 1,
-                    height: '4px',
-                    background: `linear-gradient(to right, #3b82f6, #eab308, #10b981)`,
-                    borderRadius: '2px',
-                    outline: 'none',
-                    cursor: 'pointer'
-                  }}
-                />
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#9ca3af' }}>
-                <span style={{ fontWeight: packingStrategy === 'lowest' ? 'bold' : 'normal', color: packingStrategy === 'lowest' ? '#3b82f6' : '#9ca3af' }}>
-                  Min Footprint
-                </span>
-                <span style={{ fontWeight: packingStrategy === 'hybrid' ? 'bold' : 'normal', color: packingStrategy === 'hybrid' ? '#eab308' : '#9ca3af' }}>
-                  Hybrid
-                </span>
-                <span style={{ fontWeight: packingStrategy === 'stable' ? 'bold' : 'normal', color: packingStrategy === 'stable' ? '#10b981' : '#9ca3af' }}>
-                  Most Stable
-                </span>
-              </div>
-              <div style={{ marginTop: '8px', fontSize: '0.7rem', color: '#6b7280', fontStyle: 'italic' }}>
-                {packingStrategy === 'lowest' && '📦 Keeps within pallet footprint (no overhang), stacks as high as needed'}
-                {packingStrategy === 'hybrid' && '⚖️ Balances footprint, height, and stability for general use'}
-                {packingStrategy === 'stable' && '🛡️ Prioritizes safety with conservative stacking'}
-              </div>
-            </div>
           </section>
 
           <section className="card inventory-card">
@@ -404,7 +403,11 @@ function App() {
 
                 return (
                   <div key={item.id} className="inv-item-container">
-                    <div className="inv-row">
+                    <div
+                      className="inv-row"
+                      onMouseEnter={() => setHoveredItemId(item.id)}
+                      onMouseLeave={() => setHoveredItemId(null)}
+                    >
                       <span className="inv-name">{item.name}</span>
                       <div className="qty-ctrl">
                         <button onClick={() => updateQuantity(item.id, -1)}>-</button>
@@ -509,13 +512,13 @@ function App() {
               <div className="stat"><span>Total Weight:</span> <strong>{summary.totalWeight.toFixed(1)} kg</strong></div>
               <div className="stat"><span>Total Pallets:</span> <strong>{summary.palletCount}</strong></div>
               <div className="stat full-width"><span>Load Dims:</span> <strong>W:{(visData.loadWidth / 10).toFixed(1)} D:{(visData.loadDepth / 10).toFixed(1)} H:{(visData.totalHeight / 10).toFixed(1)} cm</strong></div>
-              {visData.layers && visData.layers.length > 0 && (
+              {visData.items && visData.items.length > 0 && (
                 <>
-                  <div className="stat"><span>Layers:</span> <strong>{visData.layers.length}</strong></div>
+                  <div className="stat"><span>Fill Rate:</span> <strong>{(visData.efficiency * 100).toFixed(1)}%</strong></div>
                   <div className="stat">
-                    <span>Stability:</span> 
-                    <strong style={{ color: visData.stabilityScore < 100 ? '#10b981' : visData.stabilityScore < 500 ? '#eab308' : '#ef4444' }}>
-                      {visData.stabilityScore < 100 ? '✓ Excellent' : visData.stabilityScore < 500 ? '⚠ Fair' : '✗ Poor'}
+                    <span>Load Safety:</span>
+                    <strong style={{ color: visData.items.some(i => i.crushRisk > 0.8) ? '#ef4444' : '#10b981' }}>
+                      {visData.items.some(i => i.crushRisk > 0.8) ? '✗ CRUSH WARNING' : '✓ SPEC SECURE'}
                     </strong>
                   </div>
                 </>

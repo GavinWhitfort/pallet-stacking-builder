@@ -399,7 +399,12 @@ export function calculateVisGeometry(items, palletType = 'AU_CHEP') {
         }
         
         const totalWeight = result.arranged.reduce((sum, item) => sum + item.weight, 0) + pallet.weight;
-        
+
+        // Calculate efficiency
+        const usedVolume = result.arranged.reduce((sum, item) => sum + (item.width * item.depth * item.height), 0);
+        const boundingVolume = result.loadWidth * result.loadDepth * (result.totalHeight - pallet.height || 1);
+        const efficiency = boundingVolume > 0 ? usedVolume / boundingVolume : 0;
+
         pallets.push({
             pallet,
             items: result.arranged,
@@ -407,7 +412,12 @@ export function calculateVisGeometry(items, palletType = 'AU_CHEP') {
             loadWidth: result.loadWidth,
             loadDepth: result.loadDepth,
             totalWeight: Math.round(totalWeight),
-            layers: result.layers
+            layers: result.layers,
+            efficiency: efficiency,
+            cg: {
+                x: 0, // Center of gravity X
+                z: 0  // Center of gravity Z
+            }
         });
         
         currentQueue = result.remaining;

@@ -1,10 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter+Tight:wght@400;700;900&display=swap');
+
 :root {
-  --bg: #0f1013;
-  --panel: #1a1b1e;
-  --border: #2c2e33;
-  --accent: #3b82f6;
-  --text: #e4e5e7;
-  --subtext: #9ca3af;
+  --bg: #000000;
+  --panel: #0a0b0d;
+  --border: #1a1b1e;
+  --accent: #FF4D00;
+  /* SAFETY ORANGE - THE SIGNAL */
+  --text: #ffffff;
+  --subtext: #888888;
+  --font-main: 'Inter Tight', -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --transition: 0.1s linear;
+  /* MECHANICAL LINEAR */
 }
 
 body {
@@ -12,32 +19,37 @@ body {
   padding: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-main);
   height: 100vh;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
 }
 
 .app-container {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  border: 1px solid var(--border);
+  /* OUTER TECHNICAL FRAME */
 }
 
 .header {
-  height: 60px;
-  background: var(--panel);
+  height: 50px;
+  background: #000;
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 16px;
 }
 
 .logo {
-  font-weight: 800;
-  font-size: 1.2rem;
-  letter-spacing: -0.5px;
+  font-weight: 900;
+  font-size: 1rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
   color: #fff;
+  font-family: var(--font-main);
 }
 
 .pallet-type-select {
@@ -45,11 +57,14 @@ body {
   background: #000;
   color: #fff;
   border: 1px solid var(--border);
-  padding: 10px;
-  border-radius: 6px;
-  font-size: 0.9rem;
+  padding: 8px;
+  border-radius: 0px;
+  /* SHARP EDGES */
+  font-size: 0.8rem;
+  font-family: var(--font-mono);
   cursor: pointer;
   margin-top: 4px;
+  text-transform: uppercase;
 }
 
 .pallet-type-select:focus {
@@ -85,7 +100,8 @@ body {
 .card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 0px;
+  /* SHARP */
   padding: 16px;
 }
 
@@ -131,13 +147,15 @@ body {
 }
 
 .p-name {
-  font-weight: 600;
-  font-size: 0.9rem;
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-transform: uppercase;
 }
 
 .p-dims {
   color: var(--subtext);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
 }
 
 .inventory-list {
@@ -162,7 +180,8 @@ body {
   gap: 8px;
   background: #000;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: 0px;
+  border: 1px solid var(--border);
 }
 
 .qty-ctrl button {
@@ -242,12 +261,13 @@ body {
 }
 
 .setting-field input {
-  background: #1a1b1e;
+  background: #000;
   border: 1px solid var(--border);
   color: #fff;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 0.85rem;
+  padding: 6px;
+  border-radius: 0px;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
 }
 
 .setting-checkbox {
@@ -302,6 +322,8 @@ body {
   align-items: baseline;
   white-space: nowrap;
   gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
 }
 
 .stat.full-width {
@@ -397,19 +419,18 @@ body {
 }
 
 .nav-btn {
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
+  background: #000;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  width: 40px;
+  height: 40px;
+  border-radius: 0px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.2rem;
+  font-size: 1rem;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  transition: var(--transition);
 }
 
 .nav-btn:disabled {
@@ -437,13 +458,16 @@ body {
 }
 
 .badge {
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(10px);
-  padding: 6px 12px;
-  border-radius: 20px;
-  font-size: 0.8rem;
+  background: rgba(0, 0, 0, 0.9);
+  padding: 4px 8px;
+  border-radius: 0px;
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
   color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--accent);
+  /* SIGNAL COLOR BORDER */
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
 .custom-add {
@@ -508,7 +532,7 @@ body {
     padding: 0;
     box-sizing: border-box;
   }
-  
+
   * {
     box-sizing: border-box;
   }
@@ -630,7 +654,7 @@ body {
     font-size: 0.85rem;
   }
 
-  .card > * {
+  .card>* {
     width: 100%;
     box-sizing: border-box;
   }
@@ -642,7 +666,8 @@ body {
 
   .setting-field input {
     padding: 8px;
-    font-size: 16px; /* Prevents zoom on iOS */
+    font-size: 16px;
+    /* Prevents zoom on iOS */
   }
 
   /* Inventory list more compact */
@@ -674,7 +699,8 @@ body {
 
   .ship-row input {
     padding: 10px;
-    font-size: 16px; /* Prevents zoom on iOS */
+    font-size: 16px;
+    /* Prevents zoom on iOS */
   }
 
   .calc-btn {
@@ -714,13 +740,15 @@ body {
 
   /* Pallet type selector */
   .pallet-type-select {
-    font-size: 16px !important; /* Prevents zoom on iOS */
+    font-size: 16px !important;
+    /* Prevents zoom on iOS */
     padding: 12px;
   }
 
   /* Search input */
   input[type="text"] {
-    font-size: 16px !important; /* Prevents zoom on iOS */
+    font-size: 16px !important;
+    /* Prevents zoom on iOS */
     width: 100% !important;
     box-sizing: border-box;
   }
